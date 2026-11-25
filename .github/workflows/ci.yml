@@ -1,0 +1,134 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test, clippy, fmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      # These crates do not depend on Servo, so no heavy system packages needed.
+      - name: Test
+        run: cargo test -p ferrosurf-core -p ferrosurf-extensions -p ferrosurf-mcp
+      - name: Clippy
+        run: cargo clippy -p ferrosurf-core -p ferrosurf-extensions -p ferrosurf-mcp --all-targets -- -D warnings
+      - name: Format
+        run: cargo fmt --all -- --check
+
+  build:
+    name: Build (${{ matrix.os }})
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # rust-toolchain.toml in the repo pins the toolchain Servo needs.
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      # ---------------- Linux prerequisites (mirrors Servo's `mach bootstrap`) ----------------
+      - name: Install Servo prerequisites (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential clang llvm lld cmake pkg-config python3 python3-pip curl git \
+            libssl-dev libdbus-1-dev libudev-dev \
+            libx11-dev libx11-xcb-dev libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev \
+            libfontconfig1-dev libfreetype6-dev \
+            libgl1-mesa-dev libegl1-mesa-dev libgles2-mesa-dev libwayland-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+
+      # ---------------- Windows prerequisites ----------------
+      # Servo's mozjs (SpiderMonkey) build on Windows needs: LLVM/clang (bindgen), CMake, Python,
+      # GNU make, and MozillaBuild (provides the POSIX tools SpiderMonkey's build system uses).
+      # The mozjs-sys build script locates MozillaBuild through MOZTOOLS_PATH (and/or MOZILLABUILD),
+      # which is what `mach bootstrap` configures on a developer machine.
+      # NOTE: adapt versions here if Servo's pinned requirements change (see Servo's
+      # .github/workflows/windows.yml and mozjs README).
+      - name: Install Servo prerequisites (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install -y llvm make nasm --no-progress
+          choco install -y cmake --installargs 'ADD_CMAKE_TO_PATH=System' --no-progress
+
+          # MozillaBuild 4.0 installer (silent install to C:\mozilla-build)
+          $url = "https://ftp.mozilla.org/pub/mozilla/libraries/win32/MozillaBuildSetup-4.0.exe"
+          Invoke-WebRequest -Uri $url -OutFile "$env:RUNNER_TEMP\MozillaBuildSetup.exe"
+          Start-Process -FilePath "$env:RUNNER_TEMP\MozillaBuildSetup.exe" -ArgumentList "/S" -Wait
+          if (-not (Test-Path "C:\mozilla-build")) { throw "MozillaBuild install failed" }
+
+          "MOZILLABUILD=C:\mozilla-build" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "MOZTOOLS_PATH=C:\mozilla-build\msys2\usr\bin" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "LIBCLANG_PATH=C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: Build release
+        run: cargo build --release -p ferrosurf
+
+      # ---------------- Package: Linux ----------------
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          D=ferrosurf-linux-x86_64
+          mkdir -p "$D/packaging"
+          cp target/release/ferrosurf "$D/"
+          cp -r crates/ferrosurf/resources "$D/resources"
+          cp -r packaging/linux "$D/packaging/"
+          cp packaging/linux/install.sh "$D/install.sh"
+          # install.sh resolves ROOT as two levels above its own dir; also keep a top-level copy working
+          sed -i 's#ROOT="$(cd "$HERE/../.." \&\& pwd)"#ROOT="$HERE"#' "$D/install.sh"
+          cp packaging/linux/org.ferroapps.FerroSurf.* "$D/"
+          tar czf "$D.tar.gz" "$D"
+      - name: Upload (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ferrosurf-linux-x86_64
+          path: ferrosurf-linux-x86_64.tar.gz
+
+      # ---------------- Package: Windows ----------------
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $d = "ferrosurf-windows-x86_64"
+          New-Item -ItemType Directory -Force $d | Out-Null
+          Copy-Item target\release\ferrosurf.exe $d\
+          Get-ChildItem target\release\*.dll -ErrorAction SilentlyContinue | Copy-Item -Destination $d\
+          Copy-Item -Recurse crates\ferrosurf\resources "$d\resources"
+          Compress-Archive -Path $d -DestinationPath "$d.zip"
+          choco install -y innosetup --no-progress
+          $env:PATH += ";${env:ProgramFiles(x86)}\Inno Setup 6"
+          ./packaging/windows/build-installer.ps1 -Version "0.0.0-ci" -SkipBuild
+      - name: Upload (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ferrosurf-windows-x86_64
+          path: |
+            ferrosurf-windows-x86_64.zip
+            dist/*-setup.exe

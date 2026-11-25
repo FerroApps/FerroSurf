@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>org.ferroapps.FerroSurf</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MPL-2.0</project_license>
+  <name>FerroSurf</name>
+  <summary>Fast, modern, AI-native web browser built on Servo</summary>
+  <summary xml:lang="es">Navegador web rápido, moderno y nativo para IA, basado en Servo</summary>
+  <description>
+    <p>FerroSurf is a fast, private and extensible web browser written in Rust that embeds the Servo engine. It can be driven by AI agents through the Model Context Protocol (MCP).</p>
+    <p xml:lang="es">FerroSurf es un navegador rápido, privado y extensible escrito en Rust que integra el motor Servo. Puede ser controlado por agentes de IA mediante el Model Context Protocol (MCP).</p>
+  </description>
+  <launchable type="desktop-id">org.ferroapps.FerroSurf.desktop</launchable>
+  <provides><binary>ferrosurf</binary></provides>
+  <categories><category>Network</category><category>WebBrowser</category></categories>
+  <supports><control>pointing</control><control>keyboard</control><control>touch</control></supports>
+  <content_rating type="oars-1.1"/>
+  <url type="homepage">https://github.com/ferroapps/FerroSurf</url>
+  <url type="bugtracker">https://github.com/ferroapps/FerroSurf/issues</url>
+  <releases>
+    <release version="0.1.0" date="2026-01-01"/>
+  </releases>
+</component>

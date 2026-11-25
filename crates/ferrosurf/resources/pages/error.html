@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="es" data-theme="{{THEME}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>No se pudo cargar la página</title>
+<style>
+:root{--accent:{{ACCENT}};--bg:#14161b;--fg:#e9eaee;--mute:#8b909c;--card:#1f232b;--line:#2d323c;--ill:#2a2f39}
+html[data-theme="light"]{--bg:#f6f3f0;--fg:#1d2026;--mute:#6b707b;--card:#fff;--line:#e2dcd6;--ill:#e8e1da}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;display:flex;align-items:center;justify-content:center;padding:24px}
+.box{max-width:560px;width:100%;text-align:center}
+svg{width:200px;height:auto;margin-bottom:12px}
+h1{font-size:28px;font-weight:600;margin:0 0 10px}
+p{color:var(--mute);line-height:1.55;margin:0 0 8px;font-size:16px}
+.url{display:inline-block;max-width:100%;margin:12px 0 26px;padding:6px 14px;border-radius:8px;background:var(--card);border:1px solid var(--line);font:13px ui-monospace,Consolas,monospace;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:top}
+button{font:inherit;font-weight:600;font-size:15px;color:#fff;background:var(--accent);border:0;border-radius:999px;padding:12px 32px;cursor:pointer}
+button:hover{filter:brightness(1.1)}
+button:focus{outline:3px solid rgba(255,106,61,.4)}
+ul{list-style:none;padding:0;margin:34px 0 0;color:var(--mute);font-size:13px;text-align:left;display:inline-block}
+li{margin:4px 0}
+li:before{content:"\203A";color:var(--accent);margin-right:8px;font-weight:700}
+</style>
+</head>
+<body>
+<div class="box">
+<svg viewBox="0 0 200 140" aria-hidden="true">
+  <ellipse cx="100" cy="124" rx="70" ry="8" fill="var(--ill)"/>
+  <path d="M20 100c14-4 22-18 30-18s14 14 30 14 24-14 40-14 24 12 44 12" fill="none" stroke="var(--ill)" stroke-width="6" stroke-linecap="round"/>
+  <rect x="62" y="22" width="76" height="60" rx="10" fill="var(--card)" stroke="var(--accent)" stroke-width="4"/>
+  <path d="M82 62c6-8 12-8 18 0 6 8 12 8 18 0" fill="none" stroke="var(--accent)" stroke-width="4" stroke-linecap="round" opacity=".5"/>
+  <circle cx="86" cy="42" r="4" fill="var(--fg)"/><circle cx="114" cy="42" r="4" fill="var(--fg)"/>
+  <path d="M88 60c4-5 20-5 24 0" fill="none" stroke="var(--fg)" stroke-width="4" stroke-linecap="round"/>
+  <path d="M150 28l6 -10M160 38l10 -6M146 18l2 -10" stroke="var(--accent)" stroke-width="4" stroke-linecap="round"/>
+</svg>
+<h1>{{TITLE}}</h1>
+<p>{{MESSAGE}}</p>
+<div class="url">{{URL}}</div><br>
+<button id="r" type="button">Reintentar</button><br>
+<ul>
+<li>Comprueba tu conexión a internet</li>
+<li>Revisa que la dirección esté bien escrita</li>
+<li>Desactiva temporalmente VPN o proxy si los usas</li>
+</ul>
+</div>
+<script>
+document.getElementById("r").addEventListener("click",function(){location.href=document.querySelector(".url").textContent});
+document.addEventListener("keydown",function(e){if(e.key==="Enter")document.getElementById("r").click()});
+</script>
+</body>
+</html>

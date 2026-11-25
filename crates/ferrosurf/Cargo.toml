@@ -1,0 +1,46 @@
+[package]
+name = "ferrosurf"
+description = "FerroSurf — a fast, modern, AI-native web browser powered by Servo"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "ferrosurf"
+path = "src/main.rs"
+
+[dependencies]
+ferrosurf-core.workspace = true
+ferrosurf-extensions.workspace = true
+ferrosurf-mcp.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+url.workspace = true
+log.workspace = true
+parking_lot.workspace = true
+tokio.workspace = true
+time.workspace = true
+
+servo = { version = "0.8", default-features = false, features = ["bundled", "clipboard", "js_jit", "subtlecrypto", "webgl", "brotli-compression-stream"] }
+winit = "0.30"
+egui = "0.36"
+egui-winit = { version = "0.36", default-features = false, features = ["clipboard", "links", "wayland", "x11"] }
+egui_glow = { version = "0.36", features = ["winit"] }
+egui-phosphor = "0.14"
+glow = "0.17"
+euclid = "0.22"
+keyboard-types = "0.8"
+http = "1"
+image = { version = "0.25", default-features = false, features = ["png"] }
+base64 = "0.22"
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs"] }
+clap = { version = "4", features = ["derive", "env"] }
+env_logger = "0.11"
+rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "tokio"] }
+arboard = "3"
+ureq = { version = "3", default-features = false, features = ["rustls", "gzip"] }
+
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"

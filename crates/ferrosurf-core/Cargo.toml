@@ -1,0 +1,25 @@
+[package]
+name = "ferrosurf-core"
+description = "FerroSurf browser core: profiles, settings, bookmarks, history, sessions, search"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+url.workspace = true
+log.workspace = true
+parking_lot.workspace = true
+uuid.workspace = true
+time.workspace = true
+directories = "6"
+rusqlite = { version = "0.38", features = ["bundled"] }
+ureq = { version = "3", default-features = false, features = ["rustls", "gzip"] }
+base64 = "0.22"
+percent-encoding = "2"
+
+[dev-dependencies]
+tempfile.workspace = true
