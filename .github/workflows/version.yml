@@ -1,0 +1,112 @@
+name: Version
+
+# The version lives in Cargo.toml (helpers: .github/scripts/version.sh).
+#   push to development                 -> PATCH + 1
+#   merged development -> main PR       -> MINOR + 1, PATCH = 0
+#   any other push to main (hotfix)     -> PATCH + 1
+# After every bump on main, main is MERGED into development (a real merge,
+# so the release commit becomes an ancestor of development and the next
+# development -> main PR has no Cargo.toml / Cargo.lock conflict). The
+# development version becomes max(main, development).
+#
+# Loop protection: the job never runs for pushes made by github-actions[bot]
+# (its pushes use GITHUB_TOKEN, which does not start workflows anyway).
+# Authorship is NOT used: a rebase merge keeps the bot as author of the old
+# release commits and must still get its MINOR bump.
+#
+# Protected branches: if main/development require pull requests or status
+# checks, add the GitHub Actions bot to the ruleset bypass list, or the bump
+# and sync pushes are rejected.
+
+on:
+  push:
+    branches: [main, development]
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: version-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      SHA: ${{ github.sha }}
+      BRANCH: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - name: Decide bump kind
+        id: kind
+        run: |
+          kind=patch
+          if [ "$BRANCH" = "main" ]; then
+            head_ref=""
+            # The commits/{sha}/pulls index is eventually consistent: right after a
+            # merge it can return an empty list (or a PR whose merged_at is still
+            # null). Retry on an empty result too, not only on API errors.
+            for attempt in 1 2 3 4 5; do
+              head_ref=$(gh api "repos/$REPO/commits/$SHA/pulls" \
+                  --jq '[.[] | select(.base.ref == "main")][0].head.ref // ""' || true)
+              [ -n "$head_ref" ] && break
+              echo "PR lookup empty or failed (attempt $attempt)"; sleep $((attempt * 5))
+            done
+            # Fallback: a merge commit whose second parent is on development is a
+            # development -> main release, whatever the API says.
+            if [ -z "$head_ref" ] && git rev-parse -q --verify "$SHA^2" >/dev/null; then
+              git fetch -q origin development
+              if git merge-base --is-ancestor "$SHA^2" origin/development; then
+                head_ref=development
+                echo "PR lookup gave nothing; second parent is on development"
+              fi
+            fi
+            if [ "$head_ref" = "development" ]; then
+              kind=minor
+            fi
+          fi
+          echo "kind=$kind" >> "$GITHUB_OUTPUT"
+          echo "bump kind: $kind"
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump, commit and push (with rebase retries)
+        id: bump
+        run: |
+          for attempt in 1 2 3 4 5; do
+            new=$(.github/scripts/version.sh bump "${{ steps.kind.outputs.kind }}")
+            if git push origin "HEAD:$BRANCH"; then
+              echo "new=$new" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "push rejected (attempt $attempt), rebasing"
+            git reset -q --hard HEAD~1
+            git pull -q --rebase origin "$BRANCH"
+            sleep $((attempt * 3))
+          done
+          exit 1
+
+      - name: Merge main back into development
+        if: github.ref_name == 'main'
+        run: |
+          for attempt in 1 2 3 4 5; do
+            target=$(.github/scripts/version.sh sync-to-development)
+            if git push origin HEAD:development; then
+              echo "development now at $target"
+              exit 0
+            fi
+            echo "development moved (attempt $attempt), retrying"
+            sleep $((attempt * 3))
+          done
+          exit 1

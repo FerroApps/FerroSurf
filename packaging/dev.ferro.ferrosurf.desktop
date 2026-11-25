@@ -1,0 +1,32 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=FerroSurf
+GenericName=Web Browser
+GenericName[es]=Navegador web
+Comment=Fast, modern, AI-native web browser built on Servo
+Comment[es]=Navegador web rápido, moderno y nativo para IA, basado en Servo
+Exec=ferrosurf %U
+Icon=dev.ferro.ferrosurf
+Terminal=false
+StartupNotify=true
+StartupWMClass=dev.ferro.ferrosurf
+Categories=Network;WebBrowser;
+Keywords=browser;web;internet;servo;mcp;
+MimeType=text/html;x-scheme-handler/http;x-scheme-handler/https;
+Actions=new-window;new-private;profile-manager;
+
+[Desktop Action new-window]
+Name=New Window
+Name[es]=Nueva ventana
+Exec=ferrosurf --new-window
+
+[Desktop Action new-private]
+Name=New Private Window
+Name[es]=Nueva ventana privada
+Exec=ferrosurf --guest
+
+[Desktop Action profile-manager]
+Name=Profile Manager
+Name[es]=Gestor de perfiles
+Exec=ferrosurf --profile-manager

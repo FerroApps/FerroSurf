@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  # Feature branches are covered by the pull_request trigger; pushing only
+  # main/development avoids duplicate runs for every PR commit.
+  push:
+    branches: [main, development]
+  pull_request:
+    branches: [main, development]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  check:
+    name: fmt, clippy, test (libraries)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+      - name: cargo clippy -- -D warnings
+        run: cargo clippy -p ferrosurf-core -p ferrosurf-extensions -p ferrosurf-mcp --all-targets -- -D warnings
+      - name: cargo test
+        run: cargo test -p ferrosurf-core -p ferrosurf-extensions -p ferrosurf-mcp
+
+  # The browser crate links Servo (SpiderMonkey + WebRender): slow the first
+  # time, then served from the rust-cache.
+  app:
+    name: clippy, test (browser + Servo)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+      - name: Install system libraries
+        run: .github/scripts/install-linux-deps.sh
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo clippy -- -D warnings
+        run: cargo clippy -p ferrosurf --all-targets -- -D warnings
+      - name: cargo test
+        run: cargo test -p ferrosurf
