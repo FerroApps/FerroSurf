@@ -152,12 +152,12 @@ impl BrowserWindow {
         }
         #[cfg(target_os = "linux")]
         {
+            // Matches StartupWMClass / the desktop file id (dev.ferro.ferrosurf).
             use winit::platform::wayland::WindowAttributesExtWayland;
-            attrs = WindowAttributesExtWayland::with_name(
-                attrs,
-                "org.ferroapps.FerroSurf",
-                "ferrosurf",
-            );
+            use winit::platform::x11::WindowAttributesExtX11;
+            attrs =
+                WindowAttributesExtWayland::with_name(attrs, "dev.ferro.ferrosurf", "ferrosurf");
+            attrs = WindowAttributesExtX11::with_name(attrs, "dev.ferro.ferrosurf", "ferrosurf");
         }
         let window = event_loop.create_window(attrs)?;
         let display_handle = event_loop.display_handle()?;

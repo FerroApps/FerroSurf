@@ -7,11 +7,12 @@ GenericName[es]=Navegador web
 Comment=Fast, modern, AI-native web browser built on Servo
 Comment[es]=Navegador web rápido, moderno y nativo para IA, basado en Servo
 Exec=ferrosurf %U
-Icon=ferrosurf
+Icon=dev.ferro.ferrosurf
 Terminal=false
 StartupNotify=true
-StartupWMClass=ferrosurf
+StartupWMClass=dev.ferro.ferrosurf
 Categories=Network;WebBrowser;
+Keywords=browser;web;internet;servo;mcp;
 MimeType=text/html;x-scheme-handler/http;x-scheme-handler/https;
 Actions=new-window;new-private;profile-manager;
 

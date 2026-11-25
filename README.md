@@ -41,6 +41,25 @@ agentes de IA pueden manejar el navegador) como cliente (el asistente puede usar
 | **Personalización** | Tema claro/oscuro/sistema, color de acento, densidad, radio de esquinas, escala y tamaño de fuente, modo oscuro web, atajos de teclado editables. |
 | **Productividad** | Paleta de comandos (Ctrl+K), buscar en página (Ctrl+F), zoom por sitio, pantalla completa, capturas, ver código fuente, importar desde Chrome/Edge/Brave/Vivaldi/Opera/Firefox/LibreWolf. |
 
+## Instalar
+
+**Linux (x86_64)** — instala o actualiza en tu carpeta personal, sin root:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/FerroApps/FerroSurf/main/install.sh | sh
+```
+
+Para desinstalar (no toca perfiles, marcadores ni historial):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/FerroApps/FerroSurf/main/install.sh | sh -s -- --uninstall
+```
+
+**Windows (x86_64)** — descarga `ferrosurf-v<versión>-windows-x86_64.zip` de la
+[última release](https://github.com/FerroApps/FerroSurf/releases/latest), descomprímelo y ejecuta `ferrosurf.exe`.
+
+Cada release incluye su `.sha256` para verificar la descarga.
+
 ## Compilar
 
 Requisitos: Rust estable (≥ 1.88) y las dependencias de compilación de Servo.
@@ -126,6 +145,13 @@ crates/
 - Linux: `~/.local/share/FerroSurf/` · Windows: `%APPDATA%\FerroApps\FerroSurf\data\`
 - Modo portátil: `--data-dir <ruta>` o `FERROSURF_HOME`.
 
+## Versiones y releases
+
+La versión vive en `Cargo.toml` y la sube el workflow **Version**: cada push a
+`development` incrementa el *patch*, y cada fusión `development → main` el *minor*.
+Tras cada subida en `main`, **Release** compila y publica `ferrosurf-v<ver>-linux-x86_64.tar.gz`
+y `ferrosurf-v<ver>-windows-x86_64.zip` (con sus `.sha256`).
+
 ## Licencia
 
-MPL-2.0, igual que Servo.
+MIT. Servo y sus componentes se distribuyen bajo MPL-2.0.
