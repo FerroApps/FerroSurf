@@ -1580,16 +1580,22 @@ fn favicon_image(img: &servo::Image) -> Option<egui::ColorImage> {
     let rgba: Vec<u8> = match img.format {
         servo::PixelFormat::RGBA8 => data.to_vec(),
         servo::PixelFormat::BGRA8 => data
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .flat_map(|p| [p[2], p[1], p[0], p[3]])
             .collect(),
         servo::PixelFormat::RGB8 => data
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .flat_map(|p| [p[0], p[1], p[2], 255])
             .collect(),
         servo::PixelFormat::K8 => data.iter().flat_map(|k| [*k, *k, *k, 255]).collect(),
         servo::PixelFormat::KA8 => data
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .flat_map(|p| [p[0], p[0], p[0], p[1]])
             .collect(),
     };
