@@ -9,8 +9,8 @@ use ferrosurf_core::settings::{AssistantProvider, McpTransportConfig};
 use ferrosurf_mcp::assistant::{AssistantConfig, AssistantEvent, Provider};
 use ferrosurf_mcp::browser::CommandEnvelope;
 use ferrosurf_mcp::{
-    BrowserBridge, ClientTransportConfig, CommandReply, EndpointFile, HttpServerHandle, McpClientManager,
-    ToolHandler, ToolPolicy,
+    BrowserBridge, ClientTransportConfig, CommandReply, EndpointFile, HttpServerHandle,
+    McpClientManager, ToolHandler, ToolPolicy,
 };
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::oneshot;
@@ -48,10 +48,19 @@ fn policy(profile: &ProfileData) -> ToolPolicy {
 }
 
 impl McpHost {
-    pub fn start(rt: &tokio::runtime::Runtime, profile: &mut ProfileData, wake: Arc<dyn Fn() + Send + Sync>) -> Self {
+    pub fn start(
+        rt: &tokio::runtime::Runtime,
+        profile: &mut ProfileData,
+        wake: Arc<dyn Fn() + Send + Sync>,
+    ) -> Self {
         let (external, external_rx) = BrowserBridge::new(wake.clone(), policy(profile));
-        let (internal, internal_rx) =
-            BrowserBridge::new(wake.clone(), ToolPolicy { allow_page_control: true, allow_data_access: true });
+        let (internal, internal_rx) = BrowserBridge::new(
+            wake.clone(),
+            ToolPolicy {
+                allow_page_control: true,
+                allow_data_access: true,
+            },
+        );
         let mut host = Self {
             external,
             external_rx,
@@ -74,15 +83,24 @@ impl McpHost {
             return;
         }
         let handler: Arc<dyn ToolHandler> = Arc::new(self.external.clone());
-        match ferrosurf_mcp::spawn_http_server(rt.handle(), handler, profile.settings.mcp_server.port, None) {
+        match ferrosurf_mcp::spawn_http_server(
+            rt.handle(),
+            handler,
+            profile.settings.mcp_server.port,
+            None,
+        ) {
             Ok(handle) => {
                 log::info!("MCP server listening on {}", handle.url);
-                let ep = EndpointFile { url: handle.url.clone(), token: handle.token.clone(), pid: std::process::id() };
+                let ep = EndpointFile {
+                    url: handle.url.clone(),
+                    token: handle.token.clone(),
+                    pid: std::process::id(),
+                };
                 if let Err(e) = ep.write(&profile.paths.mcp_token()) {
                     log::error!("Could not write MCP endpoint file: {e}");
                 }
                 self.server = Some(handle);
-            },
+            }
             Err(e) => log::error!("Could not start MCP server: {e}"),
         }
     }
@@ -96,21 +114,24 @@ impl McpHost {
     }
 
     pub fn url(&self) -> String {
-        self.server.as_ref().map(|s| s.url.clone()).unwrap_or_default()
+        self.server
+            .as_ref()
+            .map(|s| s.url.clone())
+            .unwrap_or_default()
     }
 
     pub fn update_policy(&mut self, profile: &ProfileData) {
         self.external.set_policy(policy(profile));
     }
 
-    /// Commands queued by either bridge.
-    pub fn take_commands(&mut self) -> Vec<CommandEnvelope> {
+    /// Commands queued by either bridge; the flag is true for external agents.
+    pub fn take_commands(&mut self) -> Vec<(CommandEnvelope, bool)> {
         let mut out = Vec::new();
         while let Ok(c) = self.external_rx.try_recv() {
-            out.push(c);
+            out.push((c, true));
         }
         while let Ok(c) = self.internal_rx.try_recv() {
-            out.push(c);
+            out.push((c, false));
         }
         out
     }
@@ -133,7 +154,9 @@ impl McpHost {
         while i < self.pending_loads.len() {
             if self.pending_loads[i].deadline <= now {
                 let p = self.pending_loads.remove(i);
-                let _ = p.reply.send(Ok(serde_json::json!({"loaded": false, "timeout": true})));
+                let _ = p
+                    .reply
+                    .send(Ok(serde_json::json!({"loaded": false, "timeout": true})));
             } else {
                 i += 1;
             }
@@ -152,8 +175,14 @@ impl McpHost {
         for ext in profile.extensions.list().iter().filter(|e| e.enabled) {
             if let Some(fs) = &ext.manifest.ferrosurf {
                 for v in &fs.mcp_servers {
-                    if let Ok(cfg) = serde_json::from_value::<ferrosurf_core::settings::McpServerConfig>(v.clone()) {
-                        configs.push((format!("{}-{}", ext.manifest.name, cfg.name), transport(&cfg.transport)));
+                    if let Ok(cfg) = serde_json::from_value::<
+                        ferrosurf_core::settings::McpServerConfig,
+                    >(v.clone())
+                    {
+                        configs.push((
+                            format!("{}-{}", ext.manifest.name, cfg.name),
+                            transport(&cfg.transport),
+                        ));
                     }
                 }
             }
@@ -218,7 +247,9 @@ impl McpHost {
                 wake();
             }
         });
-        rt.spawn(ferrosurf_mcp::assistant::run_turn(cfg, history, text, page, tools, fwd_tx, cancel));
+        rt.spawn(ferrosurf_mcp::assistant::run_turn(
+            cfg, history, text, page, tools, fwd_tx, cancel,
+        ));
     }
 
     pub fn stop_assistant(&mut self, shared: &mut SharedUi) {
@@ -237,7 +268,10 @@ impl McpHost {
         }
         let status = self.clients.status();
         if status.len() != shared.mcp_clients.len()
-            || status.iter().zip(&shared.mcp_clients).any(|(a, b)| a.connected != b.connected || a.tool_count != b.tool_count)
+            || status
+                .iter()
+                .zip(&shared.mcp_clients)
+                .any(|(a, b)| a.connected != b.connected || a.tool_count != b.tool_count)
         {
             shared.mcp_clients = status;
             changed = true;
@@ -254,12 +288,42 @@ impl McpHost {
     }
 }
 
+/// Human readable description of a command that changes something, or None if read-only.
+pub fn describe_mutation(cmd: &ferrosurf_mcp::BrowserCommand) -> Option<String> {
+    use ferrosurf_mcp::BrowserCommand as C;
+    Some(match cmd {
+        C::OpenTab { url, .. } => format!("abrir una pestaña con «{url}»"),
+        C::CloseTab { tab_id } => format!("cerrar la pestaña {tab_id}"),
+        C::Navigate { url, .. } => format!("navegar a «{url}»"),
+        C::EvaluateJs { script, .. } => {
+            let s: String = script.chars().take(160).collect();
+            format!("ejecutar JavaScript en la página (clic, escritura o script):\n{s}…")
+        }
+        C::AddBookmark { url, .. } => {
+            format!("añadir un marcador {}", url.clone().unwrap_or_default())
+        }
+        _ => return None,
+    })
+}
+
+/// A command from an external agent waiting for the user's approval.
+pub struct PendingApproval {
+    pub description: String,
+    pub cmd: ferrosurf_mcp::BrowserCommand,
+    pub reply: oneshot::Sender<CommandReply>,
+}
+
 fn transport(t: &McpTransportConfig) -> ClientTransportConfig {
     match t {
-        McpTransportConfig::Stdio { command, args, env } => {
-            ClientTransportConfig::Stdio { command: command.clone(), args: args.clone(), env: env.clone() }
+        McpTransportConfig::Stdio { command, args, env } => ClientTransportConfig::Stdio {
+            command: command.clone(),
+            args: args.clone(),
+            env: env.clone(),
         },
-        McpTransportConfig::Http { url, headers } => ClientTransportConfig::Http { url: url.clone(), headers: headers.clone() },
+        McpTransportConfig::Http { url, headers } => ClientTransportConfig::Http {
+            url: url.clone(),
+            headers: headers.clone(),
+        },
     }
 }
 
@@ -273,15 +337,19 @@ pub fn js_to_json(v: servo::JSValue) -> serde_json::Value {
             if n.fract() == 0.0 && n.abs() < 9.0e15 {
                 Value::from(n as i64)
             } else {
-                serde_json::Number::from_f64(n).map(Value::Number).unwrap_or(Value::Null)
+                serde_json::Number::from_f64(n)
+                    .map(Value::Number)
+                    .unwrap_or(Value::Null)
             }
-        },
+        }
         servo::JSValue::String(s) => Value::String(s),
         servo::JSValue::Element(s) => serde_json::json!({"element": s}),
         servo::JSValue::ShadowRoot(s) => serde_json::json!({"shadowRoot": s}),
         servo::JSValue::Frame(s) => serde_json::json!({"frame": s}),
         servo::JSValue::Window(s) => serde_json::json!({"window": s}),
         servo::JSValue::Array(a) => Value::Array(a.into_iter().map(js_to_json).collect()),
-        servo::JSValue::Object(o) => Value::Object(o.into_iter().map(|(k, v)| (k, js_to_json(v))).collect()),
+        servo::JSValue::Object(o) => {
+            Value::Object(o.into_iter().map(|(k, v)| (k, js_to_json(v))).collect())
+        }
     }
 }

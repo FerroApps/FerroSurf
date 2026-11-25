@@ -59,10 +59,16 @@ struct Worker {
 
 impl Worker {
     fn new() -> Arc<Self> {
-        Arc::new(Self { ctl: AtomicU8::new(RUN), done: AtomicBool::new(false) })
+        Arc::new(Self {
+            ctl: AtomicU8::new(RUN),
+            done: AtomicBool::new(false),
+        })
     }
     fn finished() -> Arc<Self> {
-        Arc::new(Self { ctl: AtomicU8::new(RUN), done: AtomicBool::new(true) })
+        Arc::new(Self {
+            ctl: AtomicU8::new(RUN),
+            done: AtomicBool::new(true),
+        })
     }
 }
 
@@ -122,7 +128,11 @@ impl DownloadManager {
                         DownloadState::Failed("Interrupted".into())
                     };
                 }
-                let dir = item.path.parent().map(Path::to_path_buf).unwrap_or_default();
+                let dir = item
+                    .path
+                    .parent()
+                    .map(Path::to_path_buf)
+                    .unwrap_or_default();
                 entries.push(Entry {
                     item,
                     dir,
@@ -135,7 +145,11 @@ impl DownloadManager {
         }
         Self {
             shared: Arc::new(Shared {
-                inner: Mutex::new(Inner { entries, next_id, history_path }),
+                inner: Mutex::new(Inner {
+                    entries,
+                    next_id,
+                    history_path,
+                }),
                 on_change,
             }),
         }
@@ -190,7 +204,11 @@ impl DownloadManager {
     }
 
     fn spawn(&self, id: DownloadId, me: Arc<Worker>, prev: Option<Arc<Worker>>) {
-        let ctx = Ctx { shared: self.shared.clone(), id, me };
+        let ctx = Ctx {
+            shared: self.shared.clone(),
+            id,
+            me,
+        };
         std::thread::Builder::new()
             .name(format!("download-{id}"))
             .spawn(move || ctx.run(prev))
@@ -200,7 +218,9 @@ impl DownloadManager {
     pub fn cancel(&self, id: DownloadId) {
         {
             let mut g = self.shared.inner.lock();
-            let Some(e) = g.entries.iter_mut().find(|e| e.item.id == id) else { return };
+            let Some(e) = g.entries.iter_mut().find(|e| e.item.id == id) else {
+                return;
+            };
             if e.item.state.is_finished() {
                 return;
             }
@@ -220,7 +240,9 @@ impl DownloadManager {
     pub fn pause(&self, id: DownloadId) {
         {
             let mut g = self.shared.inner.lock();
-            let Some(e) = g.entries.iter_mut().find(|e| e.item.id == id) else { return };
+            let Some(e) = g.entries.iter_mut().find(|e| e.item.id == id) else {
+                return;
+            };
             if !e.item.state.is_active() {
                 return;
             }
@@ -235,7 +257,9 @@ impl DownloadManager {
     pub fn resume(&self, id: DownloadId) {
         let spawned = {
             let mut g = self.shared.inner.lock();
-            let Some(e) = g.entries.iter_mut().find(|e| e.item.id == id) else { return };
+            let Some(e) = g.entries.iter_mut().find(|e| e.item.id == id) else {
+                return;
+            };
             let resumable = match e.item.state {
                 DownloadState::Paused => true,
                 DownloadState::Failed(_) => e.resolved && part_path(&e.item.path).exists(),
@@ -259,8 +283,13 @@ impl DownloadManager {
     pub fn retry(&self, id: DownloadId) {
         let spawned = {
             let mut g = self.shared.inner.lock();
-            let Some(e) = g.entries.iter_mut().find(|e| e.item.id == id) else { return };
-            if !matches!(e.item.state, DownloadState::Failed(_) | DownloadState::Cancelled) {
+            let Some(e) = g.entries.iter_mut().find(|e| e.item.id == id) else {
+                return;
+            };
+            if !matches!(
+                e.item.state,
+                DownloadState::Failed(_) | DownloadState::Cancelled
+            ) {
                 return;
             }
             let worker = Worker::new();
@@ -269,7 +298,10 @@ impl DownloadManager {
                 let _ = fs::remove_file(part_path(&e.item.path));
             }
             e.resolved = false;
-            let guess = e.suggested.clone().unwrap_or_else(|| file_name_from_url(&e.item.url));
+            let guess = e
+                .suggested
+                .clone()
+                .unwrap_or_else(|| file_name_from_url(&e.item.url));
             e.item.path = e.dir.join(&guess);
             e.item.file_name = guess;
             e.item.state = DownloadState::Queued;
@@ -288,7 +320,9 @@ impl DownloadManager {
     pub fn remove(&self, id: DownloadId) {
         {
             let mut g = self.shared.inner.lock();
-            let Some(pos) = g.entries.iter().position(|e| e.item.id == id) else { return };
+            let Some(pos) = g.entries.iter().position(|e| e.item.id == id) else {
+                return;
+            };
             let e = g.entries.remove(pos);
             if e.item.state != DownloadState::Completed {
                 e.worker.ctl.store(CANCEL, Ordering::SeqCst);
@@ -311,15 +345,33 @@ impl DownloadManager {
     }
 
     pub fn items(&self) -> Vec<DownloadItem> {
-        self.shared.inner.lock().entries.iter().map(|e| e.item.clone()).collect()
+        self.shared
+            .inner
+            .lock()
+            .entries
+            .iter()
+            .map(|e| e.item.clone())
+            .collect()
     }
 
     pub fn get(&self, id: DownloadId) -> Option<DownloadItem> {
-        self.shared.inner.lock().entries.iter().find(|e| e.item.id == id).map(|e| e.item.clone())
+        self.shared
+            .inner
+            .lock()
+            .entries
+            .iter()
+            .find(|e| e.item.id == id)
+            .map(|e| e.item.clone())
     }
 
     pub fn active_count(&self) -> usize {
-        self.shared.inner.lock().entries.iter().filter(|e| e.item.state.is_active()).count()
+        self.shared
+            .inner
+            .lock()
+            .entries
+            .iter()
+            .filter(|e| e.item.state.is_active())
+            .count()
     }
 
     /// Combined progress (0..=1) of active downloads with a known size.
@@ -464,15 +516,17 @@ impl Ctx {
             }
         }
         match self.download() {
-            Ok(Outcome::Done) | Ok(Outcome::Stopped) => {},
+            Ok(Outcome::Done) | Ok(Outcome::Stopped) => {}
             Err(e) => {
                 if self.ctl() == RUN {
                     self.transition(DownloadState::Failed(format!("{e:#}")));
                 }
-            },
+            }
         }
         if self.ctl() == CANCEL
-            && let Some(path) = self.with(|e| e.resolved.then(|| e.item.path.clone())).flatten()
+            && let Some(path) = self
+                .with(|e| e.resolved.then(|| e.item.path.clone()))
+                .flatten()
         {
             let _ = fs::remove_file(part_path(&path));
         }
@@ -497,22 +551,33 @@ impl Ctx {
     /// Choose a unique destination for `name`, reserve it by creating its `.part` file.
     fn reserve(&self, name: &str) -> anyhow::Result<File> {
         let mut g = self.shared.inner.lock();
-        let taken: Vec<PathBuf> =
-            g.entries.iter().filter(|e| e.item.id != self.id && e.resolved).map(|e| e.item.path.clone()).collect();
+        let taken: Vec<PathBuf> = g
+            .entries
+            .iter()
+            .filter(|e| e.item.id != self.id && e.resolved)
+            .map(|e| e.item.path.clone())
+            .collect();
         let Some(e) = g.entries.iter_mut().find(|e| e.item.id == self.id) else {
             anyhow::bail!("download removed");
         };
         fs::create_dir_all(&e.dir)?;
-        let path = unique_path(&e.dir, name, |p| p.exists() || part_path(p).exists() || taken.iter().any(|t| t == p));
+        let path = unique_path(&e.dir, name, |p| {
+            p.exists() || part_path(p).exists() || taken.iter().any(|t| t == p)
+        });
         let file = File::create(part_path(&path))?;
-        e.item.file_name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        e.item.file_name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
         e.item.path = path;
         e.resolved = true;
         Ok(file)
     }
 
     fn download(&self) -> anyhow::Result<Outcome> {
-        let Some(snap) = self.snapshot() else { return Ok(Outcome::Stopped) };
+        let Some(snap) = self.snapshot() else {
+            return Ok(Outcome::Stopped);
+        };
         if self.ctl() != RUN {
             return Ok(Outcome::Stopped);
         }
@@ -530,7 +595,10 @@ impl Ctx {
         let mut file = if snap.resolved {
             File::create(part_path(&snap.path))?
         } else {
-            let name = snap.suggested.clone().unwrap_or_else(|| default_name_for_mime(&mime));
+            let name = snap
+                .suggested
+                .clone()
+                .unwrap_or_else(|| default_name_for_mime(&mime));
             self.reserve(&name)?
         };
         file.write_all(&bytes)?;
@@ -548,18 +616,26 @@ impl Ctx {
         if self.ctl() != RUN {
             return Ok(Outcome::Stopped);
         }
-        let Some(path) = self.with(|e| e.item.path.clone()) else { return Ok(Outcome::Stopped) };
+        let Some(path) = self.with(|e| e.item.path.clone()) else {
+            return Ok(Outcome::Stopped);
+        };
         let part = part_path(&path);
         let mut dest = path.clone();
         if dest.exists() {
             let dir = dest.parent().map(Path::to_path_buf).unwrap_or_default();
-            let name = dest.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let name = dest
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
             dest = unique_path(&dir, &name, |p| p.exists());
         }
         fs::rename(&part, &dest)?;
         self.with(|e| {
             e.item.path = dest.clone();
-            e.item.file_name = dest.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            e.item.file_name = dest
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
             if e.item.total_bytes.is_none() {
                 e.item.total_bytes = Some(e.item.received_bytes);
             }
@@ -571,7 +647,9 @@ impl Ctx {
     fn download_http(&self, snap: &Snapshot) -> anyhow::Result<Outcome> {
         let agent = make_agent(&snap.url);
         let mut offset = if snap.resolved {
-            fs::metadata(part_path(&snap.path)).map(|m| m.len()).unwrap_or(0)
+            fs::metadata(part_path(&snap.path))
+                .map(|m| m.len())
+                .unwrap_or(0)
         } else {
             0
         };
@@ -600,21 +678,37 @@ impl Ctx {
             return Ok(Outcome::Stopped);
         }
         let status = resp.status().as_u16();
-        let header = |n: &str| resp.headers().get(n).and_then(|v| v.to_str().ok()).map(str::to_string);
+        let header = |n: &str| {
+            resp.headers()
+                .get(n)
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_string)
+        };
         let content_length = header("content-length").and_then(|v| v.trim().parse::<u64>().ok());
         let mime = header("content-type")
-            .map(|m| m.split(';').next().unwrap_or("").trim().to_ascii_lowercase())
+            .map(|m| {
+                m.split(';')
+                    .next()
+                    .unwrap_or("")
+                    .trim()
+                    .to_ascii_lowercase()
+            })
             .filter(|m| !m.is_empty());
 
         let (mut file, total, mut received) = if status == 206 && offset > 0 {
-            let total = header("content-range")
-                .and_then(|r| parse_content_range(&r));
+            let total = header("content-range").and_then(|r| parse_content_range(&r));
             match total {
-                Some((start, _)) if start != offset => anyhow::bail!("server returned unexpected range"),
-                _ => {},
+                Some((start, _)) if start != offset => {
+                    anyhow::bail!("server returned unexpected range")
+                }
+                _ => {}
             }
-            let total = total.and_then(|t| t.1).or(content_length.map(|l| l + offset));
-            let f = OpenOptions::new().append(true).open(part_path(&snap.path))?;
+            let total = total
+                .and_then(|t| t.1)
+                .or(content_length.map(|l| l + offset));
+            let f = OpenOptions::new()
+                .append(true)
+                .open(part_path(&snap.path))?;
             (f, total, offset)
         } else {
             // Fresh download (or the server ignored our Range request: start over).
@@ -624,7 +718,9 @@ impl Ctx {
                 let name = snap
                     .suggested
                     .clone()
-                    .or_else(|| header("content-disposition").and_then(|cd| parse_content_disposition(&cd)))
+                    .or_else(|| {
+                        header("content-disposition").and_then(|cd| parse_content_disposition(&cd))
+                    })
                     .unwrap_or_else(|| file_name_from_url(&snap.url));
                 self.reserve(&name)?
             };
@@ -657,16 +753,16 @@ impl Ctx {
                     self.persist();
                     self.notify();
                     return Ok(Outcome::Stopped);
-                },
+                }
                 CANCEL => return Ok(Outcome::Stopped),
-                _ => {},
+                _ => {}
             }
             let n = match reader.read(&mut buf) {
                 Ok(n) => n,
                 Err(e) if self.ctl() != RUN => {
                     log::debug!("download interrupted: {e}");
                     continue;
-                },
+                }
                 Err(e) => return Err(e.into()),
             };
             if n == 0 {
@@ -678,14 +774,19 @@ impl Ctx {
             let elapsed = last_tick.elapsed();
             if elapsed >= Duration::from_millis(100) {
                 let inst = tick_bytes as f64 / elapsed.as_secs_f64();
-                speed = if speed == 0.0 { inst } else { speed * 0.6 + inst * 0.4 };
+                speed = if speed == 0.0 {
+                    inst
+                } else {
+                    speed * 0.6 + inst * 0.4
+                };
                 last_tick = Instant::now();
                 tick_bytes = 0;
-                if self.with(|e| {
-                    e.item.received_bytes = received;
-                    e.item.bytes_per_sec = speed;
-                })
-                .is_none()
+                if self
+                    .with(|e| {
+                        e.item.received_bytes = received;
+                        e.item.bytes_per_sec = speed;
+                    })
+                    .is_none()
                 {
                     return Ok(Outcome::Stopped);
                 }
@@ -741,16 +842,25 @@ pub fn sanitize_file_name(name: &str) -> String {
         .chars()
         .filter(|c| !c.is_control() && !matches!(c, ':' | '*' | '?' | '"' | '<' | '>' | '|'))
         .collect();
-    let mut s = cleaned.trim_matches(|c: char| c == '.' || c.is_whitespace()).to_string();
+    let mut s = cleaned
+        .trim_matches(|c: char| c == '.' || c.is_whitespace())
+        .to_string();
     if s.chars().count() > MAX_NAME_CHARS {
         let (stem, ext) = split_ext(&s);
         let ext: String = ext.chars().take(20).collect();
         let keep = MAX_NAME_CHARS - ext.chars().count();
         let stem: String = stem.chars().take(keep).collect();
         s = format!("{stem}{ext}");
-        s = s.trim_matches(|c: char| c == '.' || c.is_whitespace()).to_string();
+        s = s
+            .trim_matches(|c: char| c == '.' || c.is_whitespace())
+            .to_string();
     }
-    let stem_upper = s.split('.').next().unwrap_or("").trim().to_ascii_uppercase();
+    let stem_upper = s
+        .split('.')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_uppercase();
     let reserved = matches!(stem_upper.as_str(), "CON" | "PRN" | "AUX" | "NUL")
         || ((stem_upper.starts_with("COM") || stem_upper.starts_with("LPT"))
             && stem_upper.len() == 4
@@ -758,7 +868,11 @@ pub fn sanitize_file_name(name: &str) -> String {
     if reserved {
         s = format!("_{s}");
     }
-    if s.is_empty() { "download".to_string() } else { s }
+    if s.is_empty() {
+        "download".to_string()
+    } else {
+        s
+    }
 }
 
 /// Split into (stem, ".ext"); ext is empty when there is none (leading dots don't count).
@@ -790,7 +904,9 @@ pub fn parse_content_disposition(value: &str) -> Option<String> {
     let mut plain = None;
     let mut extended = None;
     for param in split_params(value).into_iter().skip(1) {
-        let Some((k, v)) = param.split_once('=') else { continue };
+        let Some((k, v)) = param.split_once('=') else {
+            continue;
+        };
         let k = k.trim().to_ascii_lowercase();
         let v = v.trim();
         if k == "filename*" {
@@ -871,11 +987,20 @@ fn decode_ext_value(v: &str) -> Option<String> {
 pub fn file_name_from_url(url: &str) -> String {
     let seg = url::Url::parse(url)
         .ok()
-        .and_then(|u| u.path_segments().and_then(|mut s| s.next_back().map(str::to_string)))
+        .and_then(|u| {
+            u.path_segments()
+                .and_then(|mut s| s.next_back().map(str::to_string))
+        })
         .unwrap_or_default();
-    let decoded = percent_encoding::percent_decode_str(&seg).decode_utf8_lossy().into_owned();
+    let decoded = percent_encoding::percent_decode_str(&seg)
+        .decode_utf8_lossy()
+        .into_owned();
     let name = sanitize_file_name(&decoded);
-    if decoded.trim().is_empty() { "download".to_string() } else { name }
+    if decoded.trim().is_empty() {
+        "download".to_string()
+    } else {
+        name
+    }
 }
 
 fn parse_content_range(v: &str) -> Option<(u64, Option<u64>)> {
@@ -909,7 +1034,9 @@ pub fn parse_data_url(url: &str) -> anyhow::Result<(String, Vec<u8>)> {
     let rest = url
         .get(5..)
         .ok_or_else(|| anyhow::anyhow!("invalid data URL"))?;
-    let (meta, data) = rest.split_once(',').ok_or_else(|| anyhow::anyhow!("invalid data URL"))?;
+    let (meta, data) = rest
+        .split_once(',')
+        .ok_or_else(|| anyhow::anyhow!("invalid data URL"))?;
     let mut base64 = false;
     let mut mime = String::new();
     for (i, part) in meta.split(';').enumerate() {
@@ -925,7 +1052,10 @@ pub fn parse_data_url(url: &str) -> anyhow::Result<(String, Vec<u8>)> {
     }
     let raw: Vec<u8> = percent_encoding::percent_decode_str(data).collect();
     let bytes = if base64 {
-        let cleaned: Vec<u8> = raw.into_iter().filter(|b| !b.is_ascii_whitespace() && *b != b'=').collect();
+        let cleaned: Vec<u8> = raw
+            .into_iter()
+            .filter(|b| !b.is_ascii_whitespace() && *b != b'=')
+            .collect();
         base64::engine::general_purpose::STANDARD_NO_PAD
             .decode(cleaned)
             .map_err(|e| anyhow::anyhow!("invalid base64 in data URL: {e}"))?
@@ -944,7 +1074,10 @@ mod tests {
 
     #[test]
     fn sanitize() {
-        assert_eq!(sanitize_file_name("a/b\\c:d*e?f\"g<h>i|j.txt"), "cdefghij.txt");
+        assert_eq!(
+            sanitize_file_name("a/b\\c:d*e?f\"g<h>i|j.txt"),
+            "cdefghij.txt"
+        );
         assert_eq!(sanitize_file_name("a:b*c?.txt"), "abc.txt");
         assert_eq!(sanitize_file_name("  ..name.. "), "name");
         assert_eq!(sanitize_file_name("CON"), "_CON");
@@ -962,22 +1095,44 @@ mod tests {
     #[test]
     fn content_disposition() {
         let p = parse_content_disposition;
-        assert_eq!(p("attachment; filename=\"a b.txt\"").as_deref(), Some("a b.txt"));
-        assert_eq!(p("attachment; filename=plain.zip").as_deref(), Some("plain.zip"));
-        assert_eq!(p("attachment; filename=\"semi;colon.txt\"").as_deref(), Some("semi;colon.txt"));
         assert_eq!(
-            p("attachment; filename=\"fallback.txt\"; filename*=UTF-8''%E2%82%AC%20rates.txt").as_deref(),
+            p("attachment; filename=\"a b.txt\"").as_deref(),
+            Some("a b.txt")
+        );
+        assert_eq!(
+            p("attachment; filename=plain.zip").as_deref(),
+            Some("plain.zip")
+        );
+        assert_eq!(
+            p("attachment; filename=\"semi;colon.txt\"").as_deref(),
+            Some("semi;colon.txt")
+        );
+        assert_eq!(
+            p("attachment; filename=\"fallback.txt\"; filename*=UTF-8''%E2%82%AC%20rates.txt")
+                .as_deref(),
             Some("€ rates.txt")
         );
-        assert_eq!(p("attachment; filename*=iso-8859-1'en'%E9.txt").as_deref(), Some("é.txt"));
-        assert_eq!(p("attachment; filename=\"../../etc/passwd\"").as_deref(), Some("passwd"));
+        assert_eq!(
+            p("attachment; filename*=iso-8859-1'en'%E9.txt").as_deref(),
+            Some("é.txt")
+        );
+        assert_eq!(
+            p("attachment; filename=\"../../etc/passwd\"").as_deref(),
+            Some("passwd")
+        );
         assert_eq!(p("inline").as_deref(), None);
-        assert_eq!(p("attachment; filename=\"q\\\"x.txt\"").as_deref(), Some("qx.txt"));
+        assert_eq!(
+            p("attachment; filename=\"q\\\"x.txt\"").as_deref(),
+            Some("qx.txt")
+        );
     }
 
     #[test]
     fn url_names() {
-        assert_eq!(file_name_from_url("https://x.test/a/b/file%20one.tar.gz?x=1"), "file one.tar.gz");
+        assert_eq!(
+            file_name_from_url("https://x.test/a/b/file%20one.tar.gz?x=1"),
+            "file one.tar.gz"
+        );
         assert_eq!(file_name_from_url("https://x.test/"), "download");
         assert_eq!(file_name_from_url("https://x.test"), "download");
         assert_eq!(file_name_from_url("not a url"), "download");
@@ -993,9 +1148,19 @@ mod tests {
         let b = unique_path(dir.path(), "f.txt", exists);
         assert_eq!(b.file_name().unwrap(), "f (1).txt");
         fs::write(&b, b"1").unwrap();
-        assert_eq!(unique_path(dir.path(), "f.txt", exists).file_name().unwrap(), "f (2).txt");
+        assert_eq!(
+            unique_path(dir.path(), "f.txt", exists)
+                .file_name()
+                .unwrap(),
+            "f (2).txt"
+        );
         fs::write(dir.path().join("noext"), b"1").unwrap();
-        assert_eq!(unique_path(dir.path(), "noext", exists).file_name().unwrap(), "noext (1)");
+        assert_eq!(
+            unique_path(dir.path(), "noext", exists)
+                .file_name()
+                .unwrap(),
+            "noext (1)"
+        );
     }
 
     #[test]
@@ -1019,14 +1184,22 @@ mod tests {
         (m, n)
     }
 
-    fn wait_for(m: &DownloadManager, id: DownloadId, pred: impl Fn(&DownloadItem) -> bool) -> DownloadItem {
+    fn wait_for(
+        m: &DownloadManager,
+        id: DownloadId,
+        pred: impl Fn(&DownloadItem) -> bool,
+    ) -> DownloadItem {
         let start = Instant::now();
         loop {
             let it = m.get(id).expect("item exists");
             if pred(&it) {
                 return it;
             }
-            assert!(start.elapsed() < Duration::from_secs(20), "timeout; state = {:?}", it.state);
+            assert!(
+                start.elapsed() < Duration::from_secs(20),
+                "timeout; state = {:?}",
+                it.state
+            );
             std::thread::sleep(Duration::from_millis(10));
         }
     }
@@ -1036,7 +1209,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let hist = dir.path().join("downloads.json");
         let (m, changes) = manager(Some(hist.clone()));
-        let id = m.start("data:text/plain;base64,aGVsbG8gd29ybGQ=", dir.path(), Some("greet:ing.txt"), vec![]);
+        let id = m.start(
+            "data:text/plain;base64,aGVsbG8gd29ybGQ=",
+            dir.path(),
+            Some("greet:ing.txt"),
+            vec![],
+        );
         let it = wait_for(&m, id, |i| i.state.is_finished());
         assert_eq!(it.state, DownloadState::Completed);
         assert_eq!(it.file_name, "greeting.txt");
@@ -1052,13 +1230,25 @@ mod tests {
         assert_eq!(fs::read(&it2.path).unwrap(), b"second");
 
         // No suggestion: default name by mime.
-        let id3 = m.start("data:image/png;base64,iVBORw0KGgo=", dir.path(), None, vec![]);
-        assert_eq!(wait_for(&m, id3, |i| i.state.is_finished()).file_name, "download.png");
+        let id3 = m.start(
+            "data:image/png;base64,iVBORw0KGgo=",
+            dir.path(),
+            None,
+            vec![],
+        );
+        assert_eq!(
+            wait_for(&m, id3, |i| i.state.is_finished()).file_name,
+            "download.png"
+        );
 
         // Persistence across restarts.
         let (m2, _) = manager(Some(hist));
         assert_eq!(m2.items().len(), 3);
-        assert!(m2.items().iter().all(|i| i.state == DownloadState::Completed));
+        assert!(
+            m2.items()
+                .iter()
+                .all(|i| i.state == DownloadState::Completed)
+        );
         let id4 = m2.start("data:,x", dir.path(), Some("x.txt"), vec![]);
         assert!(id4 > id3);
         wait_for(&m2, id4, |i| i.state.is_finished());
@@ -1076,7 +1266,12 @@ mod tests {
 
     /// Tiny HTTP server. `/file` serves `data` (with Content-Disposition `cd` if given);
     /// bytes are sent in 64 KiB chunks with `delay_ms` between them.
-    fn spawn_server(data: Vec<u8>, honor_range: bool, cd: Option<&'static str>, delay_ms: u64) -> Server {
+    fn spawn_server(
+        data: Vec<u8>,
+        honor_range: bool,
+        cd: Option<&'static str>,
+        delay_ms: u64,
+    ) -> Server {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         let range_requests = Arc::new(AtomicUsize::new(0));
@@ -1119,11 +1314,16 @@ mod tests {
                                 ),
                                 &data[start as usize..],
                             )
-                        },
-                        _ => (format!("HTTP/1.1 200 OK\r\nContent-Length: {total}\r\n"), &data[..]),
+                        }
+                        _ => (
+                            format!("HTTP/1.1 200 OK\r\nContent-Length: {total}\r\n"),
+                            &data[..],
+                        ),
                     };
                     let mut head = head;
-                    head.push_str("Content-Type: application/octet-stream\r\nConnection: close\r\n");
+                    head.push_str(
+                        "Content-Type: application/octet-stream\r\nConnection: close\r\n",
+                    );
                     if let Some(cd) = cd {
                         head.push_str(&format!("Content-Disposition: {cd}\r\n"));
                     }
@@ -1142,7 +1342,10 @@ mod tests {
                 });
             }
         });
-        Server { port, range_requests }
+        Server {
+            port,
+            range_requests,
+        }
     }
 
     fn pattern(len: usize) -> Vec<u8> {
@@ -1152,7 +1355,12 @@ mod tests {
     #[test]
     fn http_download_with_content_disposition() {
         let data = pattern(300_000);
-        let srv = spawn_server(data.clone(), true, Some("attachment; filename*=UTF-8''r%C3%A9sum%C3%A9.bin"), 0);
+        let srv = spawn_server(
+            data.clone(),
+            true,
+            Some("attachment; filename*=UTF-8''r%C3%A9sum%C3%A9.bin"),
+            0,
+        );
         let dir = tempfile::tempdir().unwrap();
         let (m, _) = manager(None);
         let url = format!("http://127.0.0.1:{}/file", srv.port);
@@ -1174,7 +1382,12 @@ mod tests {
         let srv = spawn_server(pattern(10), true, None, 0);
         let dir = tempfile::tempdir().unwrap();
         let (m, _) = manager(None);
-        let id = m.start(&format!("http://127.0.0.1:{}/missing", srv.port), dir.path(), None, vec![]);
+        let id = m.start(
+            &format!("http://127.0.0.1:{}/missing", srv.port),
+            dir.path(),
+            None,
+            vec![],
+        );
         let it = wait_for(&m, id, |i| i.state.is_finished());
         assert_eq!(it.state, DownloadState::Failed("HTTP 404".into()));
         m.retry(id);
@@ -1187,7 +1400,12 @@ mod tests {
         let srv = spawn_server(data.clone(), honor_range, None, 15);
         let dir = tempfile::tempdir().unwrap();
         let (m, _) = manager(None);
-        let id = m.start(&format!("http://127.0.0.1:{}/file", srv.port), dir.path(), Some("big.bin"), vec![]);
+        let id = m.start(
+            &format!("http://127.0.0.1:{}/file", srv.port),
+            dir.path(),
+            Some("big.bin"),
+            vec![],
+        );
         let it = wait_for(&m, id, |i| i.received_bytes > 0);
         assert!(it.received_bytes < data.len() as u64);
         assert_eq!(it.state, DownloadState::InProgress);
@@ -1202,7 +1420,10 @@ mod tests {
         assert_eq!(it.state, DownloadState::Completed, "{it:?}");
         assert_eq!(fs::read(&it.path).unwrap(), data);
         assert!(!part.exists());
-        assert_eq!(srv.range_requests.load(Ordering::SeqCst), usize::from(honor_range));
+        assert_eq!(
+            srv.range_requests.load(Ordering::SeqCst),
+            usize::from(honor_range)
+        );
     }
 
     #[test]
@@ -1221,7 +1442,12 @@ mod tests {
         let srv = spawn_server(data, true, None, 20);
         let dir = tempfile::tempdir().unwrap();
         let (m, _) = manager(None);
-        let id = m.start(&format!("http://127.0.0.1:{}/file", srv.port), dir.path(), Some("c.bin"), vec![]);
+        let id = m.start(
+            &format!("http://127.0.0.1:{}/file", srv.port),
+            dir.path(),
+            Some("c.bin"),
+            vec![],
+        );
         wait_for(&m, id, |i| i.received_bytes > 0);
         assert_eq!(m.active_count(), 1);
         assert!(m.overall_progress().is_some());
@@ -1231,7 +1457,10 @@ mod tests {
         let start = Instant::now();
         let part = part_path(&dir.path().join("c.bin"));
         while part.exists() {
-            assert!(start.elapsed() < Duration::from_secs(5), "part file not removed");
+            assert!(
+                start.elapsed() < Duration::from_secs(5),
+                "part file not removed"
+            );
             std::thread::sleep(Duration::from_millis(20));
         }
         assert!(!dir.path().join("c.bin").exists());

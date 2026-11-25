@@ -19,25 +19,36 @@ use winit::window::{Window, WindowId};
 
 use crate::actions::{Accelerator, Action, Keymap};
 use crate::delegate::Delegate;
-use crate::internal_pages::SharedPageContext;
 use crate::profile_data::ProfileData;
 use crate::tab::{Tab, TabId};
 use crate::ui::{self, Chrome, SharedUi};
 
 /// Things only the [`crate::app::App`] can do.
 pub enum AppCmd {
-    NewWindow { urls: Vec<Url> },
+    NewWindow {
+        urls: Vec<Url>,
+    },
     NewGuestWindow,
     OpenProfile(String),
     CloseWindow(WindowId),
     Quit,
     ExtensionsChanged,
     SettingsChanged,
-    ClearBrowsingData { history: bool, cookies: bool, cache: bool },
-    StartAssistant { text: String },
+    ClearBrowsingData {
+        history: bool,
+        cookies: bool,
+        cache: bool,
+    },
+    StartAssistant {
+        text: String,
+    },
     StopAssistant,
     ReconnectMcpClients,
     RestartMcpServer,
+    ResolveMcpApproval {
+        allow: bool,
+        always: bool,
+    },
 }
 
 /// References to app-wide state handed to window methods.
@@ -47,7 +58,6 @@ pub struct Env<'a> {
     pub ucm: &'a Rc<UserContentManager>,
     pub profile: &'a mut ProfileData,
     pub keymap: &'a Keymap,
-    pub page_ctx: &'a SharedPageContext,
     pub shared: &'a mut SharedUi,
     pub app_cmds: &'a mut Vec<AppCmd>,
 }
@@ -64,22 +74,34 @@ pub enum Disposition {
 pub enum Cmd {
     Action(Action),
     /// Raw omnibox input or URL.
-    Navigate { input: String, disposition: Disposition },
-    OpenUrl { url: Url, disposition: Disposition },
+    Navigate {
+        input: String,
+        disposition: Disposition,
+    },
+    OpenUrl {
+        url: Url,
+        disposition: Disposition,
+    },
     ActivateTab(TabId),
     CloseTab(TabId),
-    MoveTab { from: usize, to: usize },
+    MoveTab {
+        from: usize,
+        to: usize,
+    },
     TogglePin(TabId),
     DuplicateTab(TabId),
     CloseOtherTabs(TabId),
     CloseTabsToRight(TabId),
     ReloadTab(TabId),
-    SetZoom(f32),
-    FindInPage { query: String, forward: bool },
+    FindInPage {
+        query: String,
+        forward: bool,
+    },
     ClearFind,
-    Download { url: Url },
+    Download {
+        url: Url,
+    },
     EvalInActive(String),
-    InputToActive(InputEvent),
     App(AppCmd),
 }
 
@@ -109,9 +131,18 @@ pub struct BrowserWindow {
 }
 
 impl BrowserWindow {
-    pub fn new(event_loop: &ActiveEventLoop, profile: &ProfileData, size: Option<(u32, u32)>, guest: bool) -> anyhow::Result<Self> {
+    pub fn new(
+        event_loop: &ActiveEventLoop,
+        profile: &ProfileData,
+        size: Option<(u32, u32)>,
+        guest: bool,
+    ) -> anyhow::Result<Self> {
         let (w, h) = size.unwrap_or((1280, 820));
-        let title = if guest { "FerroSurf — Invitado" } else { "FerroSurf" };
+        let title = if guest {
+            "FerroSurf — Invitado"
+        } else {
+            "FerroSurf"
+        };
         let mut attrs = Window::default_attributes()
             .with_title(title)
             .with_inner_size(winit::dpi::LogicalSize::new(w, h))
@@ -122,7 +153,11 @@ impl BrowserWindow {
         #[cfg(target_os = "linux")]
         {
             use winit::platform::wayland::WindowAttributesExtWayland;
-            attrs = WindowAttributesExtWayland::with_name(attrs, "org.ferroapps.FerroSurf", "ferrosurf");
+            attrs = WindowAttributesExtWayland::with_name(
+                attrs,
+                "org.ferroapps.FerroSurf",
+                "ferrosurf",
+            );
         }
         let window = event_loop.create_window(attrs)?;
         let display_handle = event_loop.display_handle()?;
@@ -135,10 +170,10 @@ impl BrowserWindow {
             .make_current()
             .map_err(|e| anyhow::anyhow!("make_current failed: {e:?}"))?;
         let size = window.inner_size();
-        let offscreen = Rc::new(rendering_context.offscreen_context(PhysicalSize::new(
-            size.width.max(1),
-            size.height.max(1),
-        )));
+        let offscreen = Rc::new(
+            rendering_context
+                .offscreen_context(PhysicalSize::new(size.width.max(1), size.height.max(1))),
+        );
 
         let egui_ctx = egui::Context::default();
         ui::theme::install_fonts(&egui_ctx);
@@ -164,7 +199,10 @@ impl BrowserWindow {
             active: 0,
             chrome: Chrome::default(),
             guest,
-            content_rect_px: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(w as f32, h as f32)),
+            content_rect_px: egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(w as f32, h as f32),
+            ),
             modifiers: ModifiersState::empty(),
             cursor_px: None,
             mouse_in_content: false,
@@ -210,10 +248,6 @@ impl BrowserWindow {
             .position(|t| t.webview.as_ref().is_some_and(|w| w.id() == webview.id()))
     }
 
-    pub fn owns_webview(&self, webview: &WebView) -> bool {
-        self.tab_by_webview(webview).is_some()
-    }
-
     fn content_size(&self) -> PhysicalSize<u32> {
         PhysicalSize::new(
             (self.content_rect_px.width().round() as u32).max(1),
@@ -222,12 +256,15 @@ impl BrowserWindow {
     }
 
     fn build_webview(&self, env: &Env, url: Url) -> WebView {
-        let webview = WebViewBuilder::new(env.servo, self.offscreen.clone() as Rc<dyn RenderingContext>)
-            .url(url)
-            .hidpi_scale_factor(Scale::new(self.scale()))
-            .delegate(env.delegate.clone())
-            .user_content_manager(env.ucm.clone())
-            .build();
+        let webview = WebViewBuilder::new(
+            env.servo,
+            self.offscreen.clone() as Rc<dyn RenderingContext>,
+        )
+        .url(url)
+        .hidpi_scale_factor(Scale::new(self.scale()))
+        .delegate(env.delegate.clone())
+        .user_content_manager(env.ucm.clone())
+        .build();
         self.configure_webview(env, &webview);
         webview
     }
@@ -235,7 +272,11 @@ impl BrowserWindow {
     fn configure_webview(&self, env: &Env, webview: &WebView) {
         webview.resize(self.content_size());
         let web_dark = env.profile.settings.appearance.web_dark_mode;
-        webview.notify_theme_change(if web_dark { servo::Theme::Dark } else { servo::Theme::Light });
+        webview.notify_theme_change(if web_dark {
+            servo::Theme::Dark
+        } else {
+            servo::Theme::Light
+        });
     }
 
     pub fn ensure_awake(&mut self, env: &Env, idx: usize) {
@@ -247,10 +288,10 @@ impl BrowserWindow {
         if self.tabs[idx].webview.is_some() {
             return;
         }
-        let url = self.tabs[idx]
-            .url
-            .clone()
-            .unwrap_or_else(|| Url::parse(&env.profile.settings.new_tab_url).unwrap_or_else(|_| Url::parse("ferro://newtab").unwrap()));
+        let url = self.tabs[idx].url.clone().unwrap_or_else(|| {
+            Url::parse(&env.profile.settings.new_tab_url)
+                .unwrap_or_else(|_| Url::parse("ferro://newtab").unwrap())
+        });
         let webview = self.build_webview(env, url);
         let zoom = self.tabs[idx].zoom;
         if (zoom - 1.0).abs() > 0.001 {
@@ -261,11 +302,18 @@ impl BrowserWindow {
     }
 
     pub fn new_tab_url(env: &Env) -> Url {
-        Url::parse(&env.profile.settings.new_tab_url).unwrap_or_else(|_| Url::parse("ferro://newtab").unwrap())
+        Url::parse(&env.profile.settings.new_tab_url)
+            .unwrap_or_else(|_| Url::parse("ferro://newtab").unwrap())
     }
 
     /// Open a new tab. Returns its id.
-    pub fn open_tab(&mut self, env: &Env, url: Option<Url>, foreground: bool, opener: Option<TabId>) -> TabId {
+    pub fn open_tab(
+        &mut self,
+        env: &Env,
+        url: Option<Url>,
+        foreground: bool,
+        opener: Option<TabId>,
+    ) -> TabId {
         let url = url.unwrap_or_else(|| Self::new_tab_url(env));
         let mut tab = Tab::new(Some(url.clone()));
         tab.opener = opener;
@@ -283,7 +331,7 @@ impl BrowserWindow {
                     i += 1;
                 }
                 i
-            },
+            }
             None => self.tabs.len(),
         };
         self.tabs.insert(idx, tab);
@@ -304,7 +352,13 @@ impl BrowserWindow {
     }
 
     /// Adopt a webview that Servo created (popup / window.open).
-    pub fn adopt_webview(&mut self, env: &Env, webview: WebView, opener: Option<TabId>, foreground: bool) {
+    pub fn adopt_webview(
+        &mut self,
+        env: &Env,
+        webview: WebView,
+        opener: Option<TabId>,
+        foreground: bool,
+    ) {
         let mut tab = Tab::new(webview.url());
         tab.opener = opener;
         self.configure_webview(env, &webview);
@@ -356,13 +410,15 @@ impl BrowserWindow {
         let tab = self.tabs.remove(idx);
         if let Some(url) = &tab.url {
             if !(url.scheme() == "ferro" && url.host_str() == Some("newtab")) {
-                env.profile.closed_tabs.push(ferrosurf_core::session::TabState {
-                    url: url.to_string(),
-                    title: tab.title.clone(),
-                    pinned: tab.pinned,
-                    zoom: tab.zoom,
-                    ..Default::default()
-                });
+                env.profile
+                    .closed_tabs
+                    .push(ferrosurf_core::session::TabState {
+                        url: url.to_string(),
+                        title: tab.title.clone(),
+                        pinned: tab.pinned,
+                        zoom: tab.zoom,
+                        ..Default::default()
+                    });
             }
         }
         self.controls.retain(|(t, _)| *t != tab.id);
@@ -398,7 +454,7 @@ impl BrowserWindow {
                 Some("bookmarks") => return self.run_action(env, Action::ShowBookmarks),
                 Some("downloads") => return self.run_action(env, Action::ShowDownloads),
                 Some("extensions") => return self.run_action(env, Action::ShowExtensions),
-                _ => {},
+                _ => {}
             }
         }
         if env.profile.settings.privacy.https_only {
@@ -427,14 +483,14 @@ impl BrowserWindow {
                 if let Some(w) = &self.tabs[idx].webview {
                     w.set_focused(true);
                 }
-            },
+            }
             Disposition::NewBackgroundTab => {
                 let opener = self.active_tab().map(|t| t.id);
                 self.open_tab(env, Some(url), false, opener);
-            },
+            }
             _ => {
                 self.open_tab(env, Some(url), true, None);
-            },
+            }
         }
         self.needs_redraw = true;
     }
@@ -465,7 +521,7 @@ impl BrowserWindow {
         match action {
             NewTab => {
                 self.open_tab(env, None, true, None);
-            },
+            }
             CloseTab => self.close_tab(env, self.active),
             ReopenClosedTab => {
                 if let Some(state) = env.profile.closed_tabs.pop() {
@@ -476,39 +532,39 @@ impl BrowserWindow {
                         }
                     }
                 }
-            },
+            }
             NextTab if !self.tabs.is_empty() => {
                 let n = (self.active + 1) % self.tabs.len();
                 self.activate(env, n);
-            },
+            }
             PrevTab if !self.tabs.is_empty() => {
                 let n = (self.active + self.tabs.len() - 1) % self.tabs.len();
                 self.activate(env, n);
-            },
+            }
             SelectTab(n) => {
                 let i = (n as usize).saturating_sub(1);
                 if i < self.tabs.len() {
                     self.activate(env, i);
                 }
-            },
+            }
             SelectLastTab if !self.tabs.is_empty() => self.activate(env, self.tabs.len() - 1),
             NewWindow => env.app_cmds.push(AppCmd::NewWindow { urls: vec![] }),
             NewGuestWindow => env.app_cmds.push(AppCmd::NewGuestWindow),
             FocusOmnibox => {
                 self.chrome.focus_omnibox = true;
                 self.chrome.select_all_omnibox = true;
-            },
+            }
             Reload => {
                 if let Some(w) = &active_wv {
                     w.reload();
                 }
-            },
+            }
             HardReload => {
                 if let Some(w) = &active_wv {
                     env.servo.network_manager().clear_cache();
                     w.reload();
                 }
-            },
+            }
             Stop => {
                 if self.chrome.close_transient() {
                     return;
@@ -518,29 +574,29 @@ impl BrowserWindow {
                 if let Some(w) = &active_wv {
                     w.evaluate_javascript("window.stop()", |_| {});
                 }
-            },
+            }
             Back => {
                 if let Some(w) = &active_wv {
                     if w.can_go_back() {
                         w.go_back(1);
                     }
                 }
-            },
+            }
             Forward => {
                 if let Some(w) = &active_wv {
                     if w.can_go_forward() {
                         w.go_forward(1);
                     }
                 }
-            },
+            }
             Home => {
                 let home = env.profile.settings.homepage.clone();
                 self.navigate_input(env, &home, Disposition::CurrentTab);
-            },
+            }
             Find => {
                 self.chrome.find.open = true;
                 self.chrome.find.focus = true;
-            },
+            }
             BookmarkPage => {
                 if let Some(tab) = self.active_tab() {
                     let url = tab.url_string();
@@ -548,36 +604,49 @@ impl BrowserWindow {
                     if !url.is_empty() {
                         let added = env.profile.bookmarks.toggle(&title, &url);
                         if added {
-                            self.chrome.bookmark_editor = env.profile.bookmarks.find_by_url(&url).map(|b| ui::BookmarkEditor::new(b));
+                            self.chrome.bookmark_editor = env
+                                .profile
+                                .bookmarks
+                                .find_by_url(&url)
+                                .map(|b| ui::BookmarkEditor::new(b));
                         }
-                        env.shared.toast(if added { "Añadido a marcadores" } else { "Marcador eliminado" });
+                        env.shared.toast(if added {
+                            "Añadido a marcadores"
+                        } else {
+                            "Marcador eliminado"
+                        });
                     }
                 }
-            },
+            }
             ToggleBookmarksBar => {
                 let s = &mut env.profile.settings.appearance.show_bookmarks_bar;
                 *s = !*s;
                 env.profile.mark_settings_dirty();
-            },
+            }
             ShowBookmarks => self.chrome.open_library(ui::LibraryTab::Bookmarks),
             ShowHistory => self.chrome.open_library(ui::LibraryTab::History),
             ShowDownloads => self.chrome.open_library(ui::LibraryTab::Downloads),
             ShowExtensions => self.chrome.open_settings(ui::SettingsPage::Extensions),
             ShowSettings => self.chrome.open_settings(ui::SettingsPage::Appearance),
-            ToggleAssistant => self.chrome.assistant_open = !self.chrome.assistant_open,
+            ToggleAssistant => {
+                self.chrome.assistant_open = !self.chrome.assistant_open;
+                if self.chrome.assistant_open {
+                    env.shared.assistant.focus_input = true;
+                }
+            }
             CommandPalette => self.chrome.palette.open(),
             ZoomIn => {
                 let z = self.active_tab().map(|t| t.zoom).unwrap_or(1.0);
                 self.set_zoom(env, next_zoom(z, true));
-            },
+            }
             ZoomOut => {
                 let z = self.active_tab().map(|t| t.zoom).unwrap_or(1.0);
                 self.set_zoom(env, next_zoom(z, false));
-            },
+            }
             ZoomReset => {
                 let z = env.profile.settings.default_zoom;
                 self.set_zoom(env, z);
-            },
+            }
             Fullscreen => {
                 if self.window.fullscreen().is_some() {
                     self.window.set_fullscreen(None);
@@ -585,25 +654,29 @@ impl BrowserWindow {
                     self.window
                         .set_fullscreen(Some(winit::window::Fullscreen::Borderless(None)));
                 }
-            },
+            }
             ToggleVerticalTabs => {
                 use ferrosurf_core::settings::TabLayout;
                 let l = &mut env.profile.settings.appearance.tab_layout;
-                *l = if *l == TabLayout::Vertical { TabLayout::Horizontal } else { TabLayout::Vertical };
+                *l = if *l == TabLayout::Vertical {
+                    TabLayout::Horizontal
+                } else {
+                    TabLayout::Vertical
+                };
                 env.profile.mark_settings_dirty();
-            },
+            }
             DuplicateTab => {
                 if let Some(tab) = self.active_tab() {
                     let url = tab.url.clone();
                     let opener = Some(tab.id);
                     self.open_tab(env, url, true, opener);
                 }
-            },
+            }
             PinTab => {
                 if let Some(id) = self.active_tab().map(|t| t.id) {
                     self.toggle_pin(id);
                 }
-            },
+            }
             ClearBrowsingData => self.chrome.open_settings(ui::SettingsPage::Privacy),
             DevTools => {
                 if env.profile.settings.enable_devtools {
@@ -613,9 +686,10 @@ impl BrowserWindow {
                     ));
                 } else {
                     self.chrome.open_settings(ui::SettingsPage::Advanced);
-                    env.shared.toast("Activa las herramientas de desarrollo en Ajustes → Avanzado");
+                    env.shared
+                        .toast("Activa las herramientas de desarrollo en Ajustes → Avanzado");
                 }
-            },
+            }
             Screenshot => self.screenshot_requested = true,
             ViewSource => {
                 if let Some(url) = self.active_tab().and_then(|t| t.url.clone()) {
@@ -623,24 +697,34 @@ impl BrowserWindow {
                         self.open_tab(env, Some(u), true, None);
                     }
                 }
-            },
+            }
             Quit => env.app_cmds.push(AppCmd::Quit),
             ProfileManager => self.chrome.open_settings(ui::SettingsPage::Profiles),
             About => {
-                self.open_url(env, Url::parse("ferro://about").unwrap(), Disposition::NewForegroundTab);
-            },
-            _ => {},
+                self.open_url(
+                    env,
+                    Url::parse("ferro://about").unwrap(),
+                    Disposition::NewForegroundTab,
+                );
+            }
+            _ => {}
         }
         self.needs_redraw = true;
     }
 
     pub fn toggle_pin(&mut self, id: TabId) {
-        let Some(idx) = self.tab_index(id) else { return };
+        let Some(idx) = self.tab_index(id) else {
+            return;
+        };
         let active_id = self.active_tab().map(|t| t.id);
         let mut tab = self.tabs.remove(idx);
         tab.pinned = !tab.pinned;
         let pinned_count = self.tabs.iter().filter(|t| t.pinned).count();
-        let new_idx = if tab.pinned { pinned_count } else { pinned_count.max(idx.min(self.tabs.len())) };
+        let new_idx = if tab.pinned {
+            pinned_count
+        } else {
+            pinned_count.max(idx.min(self.tabs.len()))
+        };
         self.tabs.insert(new_idx.min(self.tabs.len()), tab);
         if let Some(a) = active_id.and_then(|a| self.tab_index(a)) {
             self.active = a;
@@ -669,12 +753,12 @@ impl BrowserWindow {
                 if let Some(i) = self.tab_index(id) {
                     self.activate(env, i);
                 }
-            },
+            }
             Cmd::CloseTab(id) => {
                 if let Some(i) = self.tab_index(id) {
                     self.close_tab(env, i);
                 }
-            },
+            }
             Cmd::MoveTab { from, to } => self.move_tab(from, to),
             Cmd::TogglePin(id) => self.toggle_pin(id),
             Cmd::DuplicateTab(id) => {
@@ -682,15 +766,20 @@ impl BrowserWindow {
                     let url = self.tabs[i].url.clone();
                     self.open_tab(env, url, true, Some(id));
                 }
-            },
+            }
             Cmd::CloseOtherTabs(id) => {
-                let ids: Vec<_> = self.tabs.iter().filter(|t| t.id != id && !t.pinned).map(|t| t.id).collect();
+                let ids: Vec<_> = self
+                    .tabs
+                    .iter()
+                    .filter(|t| t.id != id && !t.pinned)
+                    .map(|t| t.id)
+                    .collect();
                 for other in ids {
                     if let Some(i) = self.tab_index(other) {
                         self.close_tab(env, i);
                     }
                 }
-            },
+            }
             Cmd::CloseTabsToRight(id) => {
                 if let Some(i) = self.tab_index(id) {
                     let ids: Vec<_> = self.tabs[i + 1..].iter().map(|t| t.id).collect();
@@ -700,13 +789,15 @@ impl BrowserWindow {
                         }
                     }
                 }
-            },
+            }
             Cmd::ReloadTab(id) => {
-                if let Some(w) = self.tab_index(id).and_then(|i| self.tabs[i].webview.clone()) {
+                if let Some(w) = self
+                    .tab_index(id)
+                    .and_then(|i| self.tabs[i].webview.clone())
+                {
                     w.reload();
                 }
-            },
-            Cmd::SetZoom(z) => self.set_zoom(env, z),
+            }
             Cmd::FindInPage { query, forward } => {
                 if let Some(w) = self.active_webview().cloned() {
                     let script = ui::find::find_script(&query, forward);
@@ -717,23 +808,20 @@ impl BrowserWindow {
                         }
                     });
                 }
-            },
+            }
             Cmd::ClearFind => {
                 if let Some(w) = self.active_webview() {
                     w.evaluate_javascript(ui::find::CLEAR_SCRIPT, |_| {});
                 }
-            },
-            Cmd::Download { url } => start_download(env, &url, self.active_tab().and_then(|t| t.url.clone())),
+            }
+            Cmd::Download { url } => {
+                start_download(env, &url, self.active_tab().and_then(|t| t.url.clone()))
+            }
             Cmd::EvalInActive(js) => {
                 if let Some(w) = self.active_webview() {
                     w.evaluate_javascript(js, |_| {});
                 }
-            },
-            Cmd::InputToActive(ev) => {
-                if let Some(w) = self.active_webview() {
-                    w.notify_input_event(ev);
-                }
-            },
+            }
             Cmd::App(c) => env.app_cmds.push(c),
         }
         self.needs_redraw = true;
@@ -747,7 +835,11 @@ impl BrowserWindow {
         let limit = Duration::from_secs(minutes as u64 * 60);
         let active = self.active;
         for (i, tab) in self.tabs.iter_mut().enumerate() {
-            if i != active && tab.webview.is_some() && !tab.audible && tab.last_active.elapsed() > limit {
+            if i != active
+                && tab.webview.is_some()
+                && !tab.audible
+                && tab.last_active.elapsed() > limit
+            {
                 log::info!("Putting tab {} to sleep", tab.display_title());
                 tab.webview = None;
                 tab.load_status = LoadStatus::Complete;
@@ -760,7 +852,12 @@ impl BrowserWindow {
     /// Returns true if the event was consumed and a redraw is needed.
     pub fn handle_window_event(&mut self, env: &mut Env, event: &WindowEvent) {
         // Global shortcuts first.
-        if let WindowEvent::KeyboardInput { event: key_event, is_synthetic: false, .. } = event {
+        if let WindowEvent::KeyboardInput {
+            event: key_event,
+            is_synthetic: false,
+            ..
+        } = event
+        {
             if key_event.state == ElementState::Pressed {
                 if let Some(acc) = Accelerator::from_key(&key_event.logical_key, self.modifiers) {
                     if let Some(action) = env.keymap.lookup(&acc) {
@@ -770,7 +867,18 @@ impl BrowserWindow {
                         let editing_combo = typing_in_ui
                             && acc.ctrl
                             && !acc.shift
-                            && matches!(acc.key.as_str(), "a" | "c" | "v" | "x" | "z" | "y" | "left" | "right" | "backspace" | "delete");
+                            && matches!(
+                                acc.key.as_str(),
+                                "a" | "c"
+                                    | "v"
+                                    | "x"
+                                    | "z"
+                                    | "y"
+                                    | "left"
+                                    | "right"
+                                    | "backspace"
+                                    | "delete"
+                            );
                         let stop_in_ui = typing_in_ui && action == Action::Stop;
                         if !editing_combo && !stop_in_ui {
                             self.run_action(env, action);
@@ -792,7 +900,7 @@ impl BrowserWindow {
             WindowEvent::Resized(size) => {
                 self.rendering_context.resize(*size);
                 self.needs_redraw = true;
-            },
+            }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
                 for tab in &self.tabs {
                     if let Some(w) = &tab.webview {
@@ -800,7 +908,7 @@ impl BrowserWindow {
                     }
                 }
                 self.needs_redraw = true;
-            },
+            }
             WindowEvent::ThemeChanged(_) => {
                 ui::theme::apply(&self.egui_ctx, env.profile, self.window.theme());
                 for tab in &self.tabs {
@@ -808,11 +916,14 @@ impl BrowserWindow {
                         self.configure_webview(env, w);
                     }
                 }
-            },
+            }
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor_px = Some(*position);
                 let p = egui::pos2(position.x as f32, position.y as f32);
-                let inside = self.content_rect_px.contains(p) && !self.chrome.blocks_content_at(&self.egui_ctx, p, self.scale());
+                let inside = self.content_rect_px.contains(p)
+                    && !self
+                        .chrome
+                        .blocks_content_at(&self.egui_ctx, p, self.scale());
                 if inside {
                     self.mouse_in_content = true;
                     if let Some(w) = self.active_webview() {
@@ -822,26 +933,35 @@ impl BrowserWindow {
                 } else if self.mouse_in_content {
                     self.mouse_in_content = false;
                     if let Some(w) = self.active_webview() {
-                        w.notify_input_event(InputEvent::MouseLeftViewport(servo::MouseLeftViewportEvent {
-                            focus_moving_to_another_iframe: false,
-                        }));
+                        w.notify_input_event(InputEvent::MouseLeftViewport(
+                            servo::MouseLeftViewportEvent {
+                                focus_moving_to_another_iframe: false,
+                            },
+                        ));
                     }
                 }
-            },
+            }
             WindowEvent::CursorLeft { .. } => {
                 if self.mouse_in_content {
                     self.mouse_in_content = false;
                     if let Some(w) = self.active_webview() {
-                        w.notify_input_event(InputEvent::MouseLeftViewport(servo::MouseLeftViewportEvent {
-                            focus_moving_to_another_iframe: false,
-                        }));
+                        w.notify_input_event(InputEvent::MouseLeftViewport(
+                            servo::MouseLeftViewportEvent {
+                                focus_moving_to_another_iframe: false,
+                            },
+                        ));
                     }
                 }
-            },
+            }
             WindowEvent::MouseInput { state, button, .. } => {
-                if let (Some(pos), Some(b)) = (self.cursor_px, crate::input::mouse_button(*button)) {
+                if let (Some(pos), Some(b)) = (self.cursor_px, crate::input::mouse_button(*button))
+                {
                     let p = egui::pos2(pos.x as f32, pos.y as f32);
-                    if self.content_rect_px.contains(p) && !self.chrome.blocks_content_at(&self.egui_ctx, p, self.scale()) {
+                    if self.content_rect_px.contains(p)
+                        && !self
+                            .chrome
+                            .blocks_content_at(&self.egui_ctx, p, self.scale())
+                    {
                         let local = p - self.content_rect_px.min;
                         let pressed = *state == ElementState::Pressed;
                         if pressed {
@@ -861,15 +981,21 @@ impl BrowserWindow {
                         }
                         if let Some(w) = self.active_webview() {
                             w.set_focused(true);
-                            w.notify_input_event(crate::input::mouse_button_event(pressed, b, local.x, local.y));
+                            w.notify_input_event(crate::input::mouse_button_event(
+                                pressed, b, local.x, local.y,
+                            ));
                         }
                     }
                 }
-            },
+            }
             WindowEvent::MouseWheel { delta, .. } => {
                 if let Some(pos) = self.cursor_px {
                     let p = egui::pos2(pos.x as f32, pos.y as f32);
-                    if self.content_rect_px.contains(p) && !self.chrome.blocks_content_at(&self.egui_ctx, p, self.scale()) {
+                    if self.content_rect_px.contains(p)
+                        && !self
+                            .chrome
+                            .blocks_content_at(&self.egui_ctx, p, self.scale())
+                    {
                         if self.modifiers.control_key() {
                             let dy = match delta {
                                 winit::event::MouseScrollDelta::LineDelta(_, y) => *y as f64,
@@ -885,35 +1011,42 @@ impl BrowserWindow {
                         }
                     }
                 }
-            },
-            WindowEvent::KeyboardInput { event: key_event, .. } => {
+            }
+            WindowEvent::KeyboardInput {
+                event: key_event, ..
+            } => {
                 if !self.egui_ctx.egui_wants_keyboard_input() && !self.chrome.has_modal() {
                     if let Some(w) = self.active_webview() {
-                        w.notify_input_event(InputEvent::Keyboard(crate::input::keyboard_event(key_event, self.modifiers)));
+                        w.notify_input_event(InputEvent::Keyboard(crate::input::keyboard_event(
+                            key_event,
+                            self.modifiers,
+                        )));
                     }
                 }
-            },
+            }
             WindowEvent::Ime(winit::event::Ime::Commit(text)) => {
                 if !self.egui_ctx.egui_wants_keyboard_input() {
                     if let Some(w) = self.active_webview() {
-                        w.notify_input_event(InputEvent::Ime(servo::ImeEvent::Composition(servo::CompositionEvent {
-                            state: servo::CompositionState::End,
-                            data: text.clone(),
-                        })));
+                        w.notify_input_event(InputEvent::Ime(servo::ImeEvent::Composition(
+                            servo::CompositionEvent {
+                                state: servo::CompositionState::End,
+                                data: text.clone(),
+                            },
+                        )));
                     }
                 }
-            },
+            }
             WindowEvent::Focused(focused) => {
                 if let Some(w) = self.active_webview() {
                     w.set_focused(*focused);
                 }
-            },
+            }
             WindowEvent::DroppedFile(path) => {
                 if let Ok(url) = Url::from_file_path(path) {
                     self.open_url(env, url, Disposition::NewForegroundTab);
                 }
-            },
-            _ => {},
+            }
+            _ => {}
         }
     }
 
@@ -993,7 +1126,11 @@ impl BrowserWindow {
 
         // Window title follows the active tab.
         let title = match self.active_tab() {
-            Some(t) => format!("{} — FerroSurf{}", t.display_title(), if self.guest { " (Invitado)" } else { "" }),
+            Some(t) => format!(
+                "{} — FerroSurf{}",
+                t.display_title(),
+                if self.guest { " (Invitado)" } else { "" }
+            ),
             None => "FerroSurf".into(),
         };
         if title != self.last_title {
@@ -1039,11 +1176,22 @@ pub fn interpret_input(env: &Env, input: &str) -> Option<Url> {
 }
 
 pub fn next_zoom(current: f32, up: bool) -> f32 {
-    const STEPS: &[f32] = &[0.3, 0.5, 0.67, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 4.0, 5.0];
+    const STEPS: &[f32] = &[
+        0.3, 0.5, 0.67, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 4.0, 5.0,
+    ];
     if up {
-        STEPS.iter().copied().find(|s| *s > current + 0.001).unwrap_or(5.0)
+        STEPS
+            .iter()
+            .copied()
+            .find(|s| *s > current + 0.001)
+            .unwrap_or(5.0)
     } else {
-        STEPS.iter().rev().copied().find(|s| *s < current - 0.001).unwrap_or(0.3)
+        STEPS
+            .iter()
+            .rev()
+            .copied()
+            .find(|s| *s < current - 0.001)
+            .unwrap_or(0.3)
     }
 }
 
@@ -1068,14 +1216,18 @@ pub fn start_download(env: &mut Env, url: &Url, referrer: Option<Url>) {
         headers.push(("User-Agent".to_string(), servo::pref!(user_agent)));
     }
     let dir = env.profile.settings.downloads.directory.clone();
-    env.profile.downloads.start(url.as_str(), &dir, None, headers);
+    env.profile
+        .downloads
+        .start(url.as_str(), &dir, None, headers);
     env.shared.toast("Descarga iniciada");
     env.shared.downloads_attention = true;
 }
 
 fn load_window_icon() -> Option<winit::window::Icon> {
     let bytes = include_bytes!("../resources/icons/ferrosurf-64.png");
-    let img = image::load_from_memory_with_format(bytes, image::ImageFormat::Png).ok()?.to_rgba8();
+    let img = image::load_from_memory_with_format(bytes, image::ImageFormat::Png)
+        .ok()?
+        .to_rgba8();
     let (w, h) = img.dimensions();
     winit::window::Icon::from_rgba(img.into_raw(), w, h).ok()
 }

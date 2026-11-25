@@ -52,7 +52,11 @@ impl Default for TabState {
 
 impl TabState {
     pub fn new(url: impl Into<String>, title: impl Into<String>) -> Self {
-        Self { url: url.into(), title: title.into(), ..Default::default() }
+        Self {
+            url: url.into(),
+            title: title.into(),
+            ..Default::default()
+        }
     }
 
     /// Cap history to the last [`MAX_TAB_HISTORY`] entries keeping `history_index` valid.
@@ -131,7 +135,12 @@ fn keep_tab(t: &TabState) -> bool {
 
 impl SessionState {
     pub fn new(windows: Vec<WindowState>, clean_exit: bool) -> Self {
-        Self { version: SESSION_VERSION, windows, saved_ms: crate::now_ms(), clean_exit }
+        Self {
+            version: SESSION_VERSION,
+            windows,
+            saved_ms: crate::now_ms(),
+            clean_exit,
+        }
     }
 
     /// Drop about:blank tabs, cap histories, drop empty windows, fix `active`.
@@ -240,7 +249,11 @@ mod tests {
         t.history = (0..40).map(|i| format!("https://a.test/{i}")).collect();
         t.history_index = 39;
         let w = WindowState {
-            tabs: vec![TabState::new("about:blank", ""), t, TabState::new("ferro://newtab", "New")],
+            tabs: vec![
+                TabState::new("about:blank", ""),
+                t,
+                TabState::new("ferro://newtab", "New"),
+            ],
             active: 2,
             ..Default::default()
         };
@@ -260,7 +273,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         assert!(SessionState::load(&dir.path().join("none.json")).is_none());
         let p = dir.path().join("s.json");
-        std::fs::write(&p, r#"{"windows":[{"tabs":[{"url":"https://x.test/"}],"active":9}]}"#).unwrap();
+        std::fs::write(
+            &p,
+            r#"{"windows":[{"tabs":[{"url":"https://x.test/"}],"active":9}]}"#,
+        )
+        .unwrap();
         let s = SessionState::load(&p).unwrap();
         assert_eq!(s.windows[0].active, 0);
         assert_eq!(s.windows[0].tabs[0].zoom, 1.0);

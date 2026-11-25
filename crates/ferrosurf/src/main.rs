@@ -19,7 +19,11 @@ use clap::Parser;
 
 /// Command line interface.
 #[derive(Parser, Debug, Clone, Default)]
-#[command(name = "ferrosurf", version, about = "FerroSurf web browser (Servo engine)")]
+#[command(
+    name = "ferrosurf",
+    version,
+    about = "FerroSurf web browser (Servo engine)"
+)]
 pub struct Cli {
     /// URLs or search terms to open.
     pub urls: Vec<String>,
@@ -60,6 +64,10 @@ pub struct Cli {
     #[arg(long)]
     pub window_size: Option<String>,
 
+    /// Load an unpacked extension from this folder (developer mode). Can be repeated.
+    #[arg(long)]
+    pub load_extension: Vec<PathBuf>,
+
     /// Don't restore the previous session.
     #[arg(long)]
     pub no_restore: bool,
@@ -95,11 +103,16 @@ fn main() -> anyhow::Result<()> {
 fn run_mcp_stdio(cli: &Cli) -> anyhow::Result<()> {
     let profiles = ferrosurf_core::ProfileManager::open_default()?;
     let profile = match &cli.profile {
-        Some(p) => profiles.get(p).cloned().ok_or_else(|| anyhow::anyhow!("unknown profile {p}"))?,
+        Some(p) => profiles
+            .get(p)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("unknown profile {p}"))?,
         None => profiles.default_profile().clone(),
     };
     let endpoint_path = profiles.paths(&profile).mcp_token();
-    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
     runtime.block_on(async move {
         // Wait for the browser to come up if it isn't running yet (start it if needed).
         let mut started = false;

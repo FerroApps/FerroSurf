@@ -1,7 +1,7 @@
 //! JSON-RPC 2.0 types.
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub const PARSE_ERROR: i64 = -32700;
 pub const INVALID_REQUEST: i64 = -32600;
@@ -30,7 +30,12 @@ pub struct Request {
 
 impl Request {
     pub fn new(id: Id, method: impl Into<String>, params: Option<Value>) -> Self {
-        Self { jsonrpc: JSONRPC_VERSION.into(), id, method: method.into(), params }
+        Self {
+            jsonrpc: JSONRPC_VERSION.into(),
+            id,
+            method: method.into(),
+            params,
+        }
     }
 }
 
@@ -44,7 +49,11 @@ pub struct Notification {
 
 impl Notification {
     pub fn new(method: impl Into<String>, params: Option<Value>) -> Self {
-        Self { jsonrpc: JSONRPC_VERSION.into(), method: method.into(), params }
+        Self {
+            jsonrpc: JSONRPC_VERSION.into(),
+            method: method.into(),
+            params,
+        }
     }
 }
 
@@ -59,7 +68,11 @@ pub struct RpcError {
 
 impl RpcError {
     pub fn new(code: i64, message: impl Into<String>) -> Self {
-        Self { code, message: message.into(), data: None }
+        Self {
+            code,
+            message: message.into(),
+            data: None,
+        }
     }
 }
 
@@ -76,7 +89,12 @@ pub struct Response {
 
 impl Response {
     pub fn ok(id: Value, result: Value) -> Self {
-        Self { jsonrpc: JSONRPC_VERSION.into(), id, result: Some(result), error: None }
+        Self {
+            jsonrpc: JSONRPC_VERSION.into(),
+            id,
+            result: Some(result),
+            error: None,
+        }
     }
     pub fn err(id: Value, code: i64, message: impl Into<String>) -> Self {
         Self {
@@ -97,11 +115,15 @@ mod tests {
 
     #[test]
     fn id_roundtrip() {
-        let r: Request = serde_json::from_str(r#"{"jsonrpc":"2.0","id":"a","method":"x"}"#).unwrap();
+        let r: Request =
+            serde_json::from_str(r#"{"jsonrpc":"2.0","id":"a","method":"x"}"#).unwrap();
         assert_eq!(r.id, Id::Str("a".into()));
         let r: Request = serde_json::from_str(r#"{"jsonrpc":"2.0","id":7,"method":"x"}"#).unwrap();
         assert_eq!(r.id, Id::Num(7));
-        assert_eq!(serde_json::to_value(&r).unwrap(), json!({"jsonrpc":"2.0","id":7,"method":"x"}));
+        assert_eq!(
+            serde_json::to_value(&r).unwrap(),
+            json!({"jsonrpc":"2.0","id":7,"method":"x"})
+        );
     }
 
     #[test]

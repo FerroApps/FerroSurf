@@ -1,27 +1,36 @@
 //! MCP client: use external MCP servers (stdio or streamable HTTP).
 
 use std::collections::{BTreeMap, HashMap};
-use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::time::Duration;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use futures_util::StreamExt;
 use parking_lot::{Mutex, RwLock};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::oneshot;
 
 use crate::jsonrpc::{self, RpcError};
-use crate::server::{BoxFuture, Content, ToolDef, ToolHandler, ToolOutput, LATEST_PROTOCOL_VERSION};
+use crate::server::{
+    BoxFuture, Content, LATEST_PROTOCOL_VERSION, ToolDef, ToolHandler, ToolOutput,
+};
 use crate::sse::SseParser;
 
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ClientTransportConfig {
-    Stdio { command: String, args: Vec<String>, env: BTreeMap<String, String> },
-    Http { url: String, headers: BTreeMap<String, String> },
+    Stdio {
+        command: String,
+        args: Vec<String>,
+        env: BTreeMap<String, String>,
+    },
+    Http {
+        url: String,
+        headers: BTreeMap<String, String>,
+    },
 }
 
 trait Transport: Send + Sync {
@@ -44,7 +53,9 @@ impl McpClient {
             ClientTransportConfig::Stdio { command, args, env } => {
                 Box::new(StdioTransport::spawn(&command, &args, &env)?)
             }
-            ClientTransportConfig::Http { url, headers } => Box::new(HttpTransport::new(url, headers)?),
+            ClientTransportConfig::Http { url, headers } => {
+                Box::new(HttpTransport::new(url, headers)?)
+            }
         };
         Self::handshake(transport).await
     }
@@ -76,8 +87,15 @@ impl McpClient {
             .unwrap_or(LATEST_PROTOCOL_VERSION)
             .to_string();
         transport.set_protocol_version(&protocol_version);
-        transport.notify("notifications/initialized", json!({})).await.context("initialized notification failed")?;
-        Ok(McpClient { transport, server_info: res.get("serverInfo").cloned().unwrap_or(Value::Null), protocol_version })
+        transport
+            .notify("notifications/initialized", json!({}))
+            .await
+            .context("initialized notification failed")?;
+        Ok(McpClient {
+            transport,
+            server_info: res.get("serverInfo").cloned().unwrap_or(Value::Null),
+            protocol_version,
+        })
     }
 
     pub fn server_info(&self) -> &Value {
@@ -109,7 +127,10 @@ impl McpClient {
 
     pub async fn call_tool(&self, name: &str, args: Value) -> Result<ToolOutput> {
         let args = if args.is_null() { json!({}) } else { args };
-        let res = self.transport.request("tools/call", json!({"name": name, "arguments": args})).await?;
+        let res = self
+            .transport
+            .request("tools/call", json!({"name": name, "arguments": args}))
+            .await?;
         Ok(parse_tool_output(&res))
     }
 
@@ -121,14 +142,27 @@ impl McpClient {
 fn parse_tool_def(v: &Value) -> Option<ToolDef> {
     let name = v.get("name")?.as_str()?.to_string();
     let ann = v.get("annotations");
-    let read_only = ann.and_then(|a| a.get("readOnlyHint")).and_then(Value::as_bool).unwrap_or(false);
-    let destructive =
-        !read_only && ann.and_then(|a| a.get("destructiveHint")).and_then(Value::as_bool).unwrap_or(true);
+    let read_only = ann
+        .and_then(|a| a.get("readOnlyHint"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let destructive = !read_only
+        && ann
+            .and_then(|a| a.get("destructiveHint"))
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
     Some(ToolDef {
         name,
         title: v.get("title").and_then(Value::as_str).map(String::from),
-        description: v.get("description").and_then(Value::as_str).unwrap_or("").to_string(),
-        input_schema: v.get("inputSchema").cloned().unwrap_or_else(|| json!({"type":"object"})),
+        description: v
+            .get("description")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        input_schema: v
+            .get("inputSchema")
+            .cloned()
+            .unwrap_or_else(|| json!({"type":"object"})),
         read_only,
         destructive,
     })
@@ -139,32 +173,57 @@ pub fn parse_tool_output(res: &Value) -> ToolOutput {
     if let Some(arr) = res.get("content").and_then(Value::as_array) {
         for c in arr {
             match c.get("type").and_then(Value::as_str) {
-                Some("text") => content.push(Content::Text(c.get("text").and_then(Value::as_str).unwrap_or("").to_string())),
+                Some("text") => content.push(Content::Text(
+                    c.get("text")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string(),
+                )),
                 Some("image") => content.push(Content::Image {
-                    data_base64: c.get("data").and_then(Value::as_str).unwrap_or("").to_string(),
-                    mime: c.get("mimeType").and_then(Value::as_str).unwrap_or("image/png").to_string(),
+                    data_base64: c
+                        .get("data")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string(),
+                    mime: c
+                        .get("mimeType")
+                        .and_then(Value::as_str)
+                        .unwrap_or("image/png")
+                        .to_string(),
                 }),
                 Some("resource") => {
                     let r = &c["resource"];
                     match r.get("text").and_then(Value::as_str) {
                         Some(t) => content.push(Content::Text(t.to_string())),
-                        None => content.push(Content::Text(format!("[resource: {}]", r.get("uri").and_then(Value::as_str).unwrap_or("?")))),
+                        None => content.push(Content::Text(format!(
+                            "[resource: {}]",
+                            r.get("uri").and_then(Value::as_str).unwrap_or("?")
+                        ))),
                     }
                 }
                 Some("resource_link") => content.push(Content::Text(format!(
                     "[resource link: {}]",
                     c.get("uri").and_then(Value::as_str).unwrap_or("?")
                 ))),
-                Some(other) => content.push(Content::Text(format!("[unsupported {other} content]"))),
+                Some(other) => {
+                    content.push(Content::Text(format!("[unsupported {other} content]")))
+                }
                 None => {}
             }
         }
     }
-    let structured = res.get("structuredContent").cloned().filter(|v| !v.is_null());
+    let structured = res
+        .get("structuredContent")
+        .cloned()
+        .filter(|v| !v.is_null());
     if let (true, Some(s)) = (content.is_empty(), &structured) {
         content.push(Content::Text(s.to_string()));
     }
-    ToolOutput { content, is_error: res.get("isError").and_then(Value::as_bool).unwrap_or(false), structured }
+    ToolOutput {
+        content,
+        is_error: res.get("isError").and_then(Value::as_bool).unwrap_or(false),
+        structured,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -192,7 +251,9 @@ impl StdioTransport {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .kill_on_drop(true);
-        let mut child = cmd.spawn().with_context(|| format!("failed to spawn MCP server '{command}'"))?;
+        let mut child = cmd
+            .spawn()
+            .with_context(|| format!("failed to spawn MCP server '{command}'"))?;
         let stdin = child.stdin.take().ok_or_else(|| anyhow!("no stdin"))?;
         let stdout = child.stdout.take().ok_or_else(|| anyhow!("no stdout"))?;
         if let Some(stderr) = child.stderr.take() {
@@ -215,8 +276,20 @@ impl StdioTransport {
         let writer: SharedWriter = Arc::new(tokio::sync::Mutex::new(Box::new(writer)));
         let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
         let closed = Arc::new(AtomicBool::new(false));
-        let reader_task = tokio::spawn(read_loop(reader, writer.clone(), pending.clone(), closed.clone()));
-        Self { writer, pending, next_id: AtomicI64::new(1), closed, reader_task, child: Mutex::new(child) }
+        let reader_task = tokio::spawn(read_loop(
+            reader,
+            writer.clone(),
+            pending.clone(),
+            closed.clone(),
+        ));
+        Self {
+            writer,
+            pending,
+            next_id: AtomicI64::new(1),
+            closed,
+            reader_task,
+            child: Mutex::new(child),
+        }
     }
 
     async fn write_msg(&self, msg: &Value) -> Result<()> {
@@ -228,12 +301,19 @@ async fn write_line(w: &SharedWriter, msg: &Value) -> Result<()> {
     let mut w = w.lock().await;
     let mut line = msg.to_string();
     line.push('\n');
-    w.write_all(line.as_bytes()).await.context("write to MCP server failed")?;
+    w.write_all(line.as_bytes())
+        .await
+        .context("write to MCP server failed")?;
     w.flush().await?;
     Ok(())
 }
 
-async fn read_loop<R: AsyncRead + Unpin>(reader: R, writer: SharedWriter, pending: Pending, closed: Arc<AtomicBool>) {
+async fn read_loop<R: AsyncRead + Unpin>(
+    reader: R,
+    writer: SharedWriter,
+    pending: Pending,
+    closed: Arc<AtomicBool>,
+) {
     let mut lines = BufReader::new(reader).lines();
     loop {
         let line = match lines.next_line().await {
@@ -254,14 +334,22 @@ async fn read_loop<R: AsyncRead + Unpin>(reader: R, writer: SharedWriter, pendin
                 let resp = if method == "ping" {
                     jsonrpc::Response::ok(id.clone(), json!({}))
                 } else {
-                    jsonrpc::Response::err(id.clone(), jsonrpc::METHOD_NOT_FOUND, format!("method not found: {method}"))
+                    jsonrpc::Response::err(
+                        id.clone(),
+                        jsonrpc::METHOD_NOT_FOUND,
+                        format!("method not found: {method}"),
+                    )
                 };
                 let _ = write_line(&writer, &resp.to_value()).await;
             }
             continue;
         }
-        let Some(id) = msg.get("id").and_then(Value::as_i64) else { continue };
-        let Some(tx) = pending.lock().remove(&id) else { continue };
+        let Some(id) = msg.get("id").and_then(Value::as_i64) else {
+            continue;
+        };
+        let Some(tx) = pending.lock().remove(&id) else {
+            continue;
+        };
         let result = match msg.get("error") {
             Some(e) => Err(serde_json::from_value::<RpcError>(e.clone())
                 .unwrap_or_else(|_| RpcError::new(jsonrpc::INTERNAL_ERROR, e.to_string()))),
@@ -312,7 +400,9 @@ impl Transport for StdioTransport {
             let _ = self.writer.lock().await.shutdown().await;
             let child = self.child.lock().take();
             if let Some(mut child) = child
-                && tokio::time::timeout(Duration::from_secs(2), child.wait()).await.is_err()
+                && tokio::time::timeout(Duration::from_secs(2), child.wait())
+                    .await
+                    .is_err()
             {
                 let _ = child.start_kill();
                 let _ = child.wait().await;
@@ -373,14 +463,26 @@ impl HttpTransport {
     }
 
     async fn post(&self, msg: &Value, want_id: Option<i64>) -> Result<Option<Value>> {
-        let resp = self.builder(reqwest::Method::POST).body(msg.to_string()).send().await.context("HTTP request to MCP server failed")?;
-        if let Some(s) = resp.headers().get("mcp-session-id").and_then(|v| v.to_str().ok()) {
+        let resp = self
+            .builder(reqwest::Method::POST)
+            .body(msg.to_string())
+            .send()
+            .await
+            .context("HTTP request to MCP server failed")?;
+        if let Some(s) = resp
+            .headers()
+            .get("mcp-session-id")
+            .and_then(|v| v.to_str().ok())
+        {
             *self.session.lock() = Some(s.to_string());
         }
         let status = resp.status();
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
-            bail!("MCP server returned HTTP {status}: {}", crate::util::truncate_chars(&body, 300));
+            bail!(
+                "MCP server returned HTTP {status}: {}",
+                crate::util::truncate_chars(&body, 300)
+            );
         }
         let Some(id) = want_id else {
             return Ok(None); // notification: body (if any) is irrelevant
@@ -393,8 +495,11 @@ impl HttpTransport {
             .unwrap_or(false);
         if !is_sse {
             let text = resp.text().await?;
-            let v: Value = serde_json::from_str(&text).with_context(|| "invalid JSON from MCP server")?;
-            return find_response(&v, id).map(Some).ok_or_else(|| anyhow!("no response with id {id} in reply"));
+            let v: Value =
+                serde_json::from_str(&text).with_context(|| "invalid JSON from MCP server")?;
+            return find_response(&v, id)
+                .map(Some)
+                .ok_or_else(|| anyhow!("no response with id {id} in reply"));
         }
         let mut parser = SseParser::new();
         let mut stream = resp.bytes_stream();
@@ -423,7 +528,9 @@ impl HttpTransport {
 fn find_response(v: &Value, id: i64) -> Option<Value> {
     match v {
         Value::Array(a) => a.iter().find_map(|x| find_response(x, id)),
-        _ if v.get("id").and_then(Value::as_i64) == Some(id) && v.get("method").is_none() => Some(v.clone()),
+        _ if v.get("id").and_then(Value::as_i64) == Some(id) && v.get("method").is_none() => {
+            Some(v.clone())
+        }
         _ => None,
     }
 }
@@ -455,7 +562,11 @@ impl Transport for HttpTransport {
     fn close(&self) -> BoxFuture<'_, ()> {
         Box::pin(async move {
             if self.session.lock().is_some() {
-                let _ = tokio::time::timeout(Duration::from_secs(3), self.builder(reqwest::Method::DELETE).send()).await;
+                let _ = tokio::time::timeout(
+                    Duration::from_secs(3),
+                    self.builder(reqwest::Method::DELETE).send(),
+                )
+                .await;
             }
         })
     }
@@ -479,7 +590,15 @@ pub struct ServerStatus {
 
 /// Sanitize to `[a-zA-Z0-9_-]`.
 fn sanitize(s: &str) -> String {
-    s.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' }).collect()
+    s.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 /// `"{server}__{tool}"`, sanitized to `[a-zA-Z0-9_-]` and capped at 64 chars.
@@ -533,10 +652,18 @@ impl McpClientManager {
         });
         for (name, res) in futures_util::future::join_all(futs).await {
             let entry = match res {
-                Ok((c, tools)) => Entry { client: Some(Arc::new(c)), error: None, tools },
+                Ok((c, tools)) => Entry {
+                    client: Some(Arc::new(c)),
+                    error: None,
+                    tools,
+                },
                 Err(e) => {
                     log::warn!("MCP server '{name}' failed to connect: {e:#}");
-                    Entry { client: None, error: Some(format!("{e:#}")), tools: vec![] }
+                    Entry {
+                        client: None,
+                        error: Some(format!("{e:#}")),
+                        tools: vec![],
+                    }
                 }
             };
             let old = self.inner.entries.write().insert(name, entry);
@@ -581,9 +708,11 @@ impl McpClientManager {
             .iter()
             .filter_map(|(n, e)| e.client.clone().map(|c| (n.clone(), c)))
             .collect();
-        let results = futures_util::future::join_all(clients.into_iter().map(|(n, c)| async move {
-            (n, c.list_tools().await)
-        }))
+        let results = futures_util::future::join_all(
+            clients
+                .into_iter()
+                .map(|(n, c)| async move { (n, c.list_tools().await) }),
+        )
         .await;
         {
             let mut entries = self.inner.entries.write();
@@ -602,7 +731,12 @@ impl McpClientManager {
         let Some((server, tool)) = route else {
             return ToolOutput::error(format!("Unknown MCP tool: {namespaced}"));
         };
-        let client = self.inner.entries.read().get(&server).and_then(|e| e.client.clone());
+        let client = self
+            .inner
+            .entries
+            .read()
+            .get(&server)
+            .and_then(|e| e.client.clone());
         let Some(client) = client else {
             return ToolOutput::error(format!("MCP server '{server}' is not connected"));
         };
@@ -620,10 +754,14 @@ impl McpClientManager {
                 let full = format!("{}__{}", sanitize(server), sanitize(&t.name));
                 let mut name = full.chars().take(64).collect::<String>();
                 if full.chars().count() > 64 || snap.routes.contains_key(&name) {
-                    let h = format!("{:08x}", crate::util::fnv1a(&format!("{server}\u{0}{}", t.name)));
+                    let h = format!(
+                        "{:08x}",
+                        crate::util::fnv1a(&format!("{server}\u{0}{}", t.name))
+                    );
                     name = format!("{}_{h}", full.chars().take(64 - 9).collect::<String>());
                 }
-                snap.routes.insert(name.clone(), (server.clone(), t.name.clone()));
+                snap.routes
+                    .insert(name.clone(), (server.clone(), t.name.clone()));
                 let mut def = t.clone();
                 def.name = name;
                 if def.title.is_none() {
@@ -658,8 +796,8 @@ impl ToolHandler for McpClientManager {
 mod tests {
     use super::*;
     use crate::server::test_support::Dummy;
-    use crate::server::{spawn_http_server, McpServer};
-    use tokio::io::{duplex, AsyncBufReadExt, BufReader};
+    use crate::server::{McpServer, spawn_http_server};
+    use tokio::io::{AsyncBufReadExt, BufReader, duplex};
 
     /// Serve `McpServer` over an in-memory duplex pipe, newline-delimited, with optional extras.
     fn serve_duplex(handler: Arc<dyn ToolHandler>, paginate: bool, chatty: bool) -> McpClientIo {
@@ -674,7 +812,9 @@ mod tests {
                 if chatty && msg["method"] == "initialize" {
                     // Server-initiated ping and a notification before replying.
                     s_w.write_all(b"{\"jsonrpc\":\"2.0\",\"method\":\"notifications/message\",\"params\":{}}\n").await.unwrap();
-                    s_w.write_all(b"{\"jsonrpc\":\"2.0\",\"id\":\"srv-1\",\"method\":\"ping\"}\n").await.unwrap();
+                    s_w.write_all(b"{\"jsonrpc\":\"2.0\",\"id\":\"srv-1\",\"method\":\"ping\"}\n")
+                        .await
+                        .unwrap();
                 }
                 let reply = if paginate && msg["method"] == "tools/list" {
                     let tools: Vec<Value> = handler.tools().iter().map(ToolDef::to_json).collect();
@@ -685,7 +825,9 @@ mod tests {
                         _ => (tools[2..].to_vec(), None),
                     };
                     let mut r = json!({"tools": page});
-                    if let Some(n) = next { r["nextCursor"] = json!(n); }
+                    if let Some(n) = next {
+                        r["nextCursor"] = json!(n);
+                    }
                     Some(json!({"jsonrpc":"2.0","id":msg["id"],"result":r}))
                 } else {
                     server.handle(msg).await
@@ -697,7 +839,10 @@ mod tests {
         });
         McpClientIo { r: c_r, w: c_w }
     }
-    struct McpClientIo { r: tokio::io::DuplexStream, w: tokio::io::DuplexStream }
+    struct McpClientIo {
+        r: tokio::io::DuplexStream,
+        w: tokio::io::DuplexStream,
+    }
 
     #[tokio::test]
     async fn stdio_client_against_fake_server() {
@@ -713,7 +858,13 @@ mod tests {
         let out = c.call_tool("boom", json!({})).await.unwrap();
         assert!(out.is_error);
         let out = c.call_tool("pic", json!({})).await.unwrap();
-        assert_eq!(out.content, vec![Content::Image { data_base64: "AAAA".into(), mime: "image/png".into() }]);
+        assert_eq!(
+            out.content,
+            vec![Content::Image {
+                data_base64: "AAAA".into(),
+                mime: "image/png".into()
+            }]
+        );
         // protocol error surfaces as Err
         assert!(c.call_tool("missing", json!({})).await.is_err());
         c.close().await;
@@ -724,7 +875,13 @@ mod tests {
     async fn pagination_is_followed() {
         let io = serve_duplex(Arc::new(Dummy), true, false);
         let c = McpClient::from_io(io.r, io.w).await.unwrap();
-        let names: Vec<_> = c.list_tools().await.unwrap().into_iter().map(|t| t.name).collect();
+        let names: Vec<_> = c
+            .list_tools()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|t| t.name)
+            .collect();
         assert_eq!(names, ["echo", "boom", "pic"]);
     }
 
@@ -737,7 +894,15 @@ mod tests {
             // answer initialize, then die on next request
             let l = lines.next_line().await.unwrap().unwrap();
             let id = serde_json::from_str::<Value>(&l).unwrap()["id"].clone();
-            s_w.write_all(format!("{}\n", json!({"jsonrpc":"2.0","id":id,"result":{"protocolVersion":"2025-06-18"}})).as_bytes()).await.unwrap();
+            s_w.write_all(
+                format!(
+                    "{}\n",
+                    json!({"jsonrpc":"2.0","id":id,"result":{"protocolVersion":"2025-06-18"}})
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
             let _ = lines.next_line().await; // initialized
             let _ = lines.next_line().await; // tools/list
             drop(s_w);
@@ -749,17 +914,27 @@ mod tests {
 
     #[tokio::test]
     async fn http_client_against_our_server() {
-        let h = spawn_http_server(&tokio::runtime::Handle::current(), Arc::new(Dummy), 0, None).unwrap();
+        let h = spawn_http_server(&tokio::runtime::Handle::current(), Arc::new(Dummy), 0, None)
+            .unwrap();
         let mut headers = BTreeMap::new();
         headers.insert("Authorization".to_string(), format!("Bearer {}", h.token));
-        let c = McpClient::connect(ClientTransportConfig::Http { url: h.url.clone(), headers }).await.unwrap();
+        let c = McpClient::connect(ClientTransportConfig::Http {
+            url: h.url.clone(),
+            headers,
+        })
+        .await
+        .unwrap();
         assert_eq!(c.list_tools().await.unwrap().len(), 3);
         let out = c.call_tool("echo", json!({"text":"http"})).await.unwrap();
         assert_eq!(out.text_content(), "echo:http");
         c.close().await;
 
         // wrong token => connect error
-        let bad = McpClient::connect(ClientTransportConfig::Http { url: h.url.clone(), headers: BTreeMap::new() }).await;
+        let bad = McpClient::connect(ClientTransportConfig::Http {
+            url: h.url.clone(),
+            headers: BTreeMap::new(),
+        })
+        .await;
         assert!(bad.is_err());
     }
 
@@ -787,10 +962,18 @@ mod tests {
         let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}/mcp", l.local_addr().unwrap());
         tokio::spawn(async move { axum::serve(l, app).await.unwrap() });
-        let c = McpClient::connect(ClientTransportConfig::Http { url, headers: BTreeMap::new() }).await.unwrap();
+        let c = McpClient::connect(ClientTransportConfig::Http {
+            url,
+            headers: BTreeMap::new(),
+        })
+        .await
+        .unwrap();
         assert_eq!(c.server_info()["name"], "sse");
         assert_eq!(c.list_tools().await.unwrap()[0].name, "t");
-        assert_eq!(c.call_tool("t", json!({})).await.unwrap().text_content(), "via sse");
+        assert_eq!(
+            c.call_tool("t", json!({})).await.unwrap().text_content(),
+            "via sse"
+        );
     }
 
     #[tokio::test]
@@ -822,21 +1005,41 @@ mod tests {
 
     #[test]
     fn namespacing() {
-        assert_eq!(namespaced_tool_name("my server", "do.thing"), "my_server__do_thing");
+        assert_eq!(
+            namespaced_tool_name("my server", "do.thing"),
+            "my_server__do_thing"
+        );
         let long = namespaced_tool_name(&"s".repeat(40), &"t".repeat(40));
         assert_eq!(long.len(), 64);
-        assert!(long.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'));
+        assert!(
+            long.chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        );
     }
 
     #[tokio::test]
     async fn manager_end_to_end() {
-        let h = spawn_http_server(&tokio::runtime::Handle::current(), Arc::new(Dummy), 0, None).unwrap();
+        let h = spawn_http_server(&tokio::runtime::Handle::current(), Arc::new(Dummy), 0, None)
+            .unwrap();
         let mut headers = BTreeMap::new();
         headers.insert("Authorization".to_string(), format!("Bearer {}", h.token));
         let m = McpClientManager::new();
         m.connect_all(vec![
-            ("good srv".into(), ClientTransportConfig::Http { url: h.url.clone(), headers }),
-            ("bad".into(), ClientTransportConfig::Stdio { command: "/nonexistent/x".into(), args: vec![], env: BTreeMap::new() }),
+            (
+                "good srv".into(),
+                ClientTransportConfig::Http {
+                    url: h.url.clone(),
+                    headers,
+                },
+            ),
+            (
+                "bad".into(),
+                ClientTransportConfig::Stdio {
+                    command: "/nonexistent/x".into(),
+                    args: vec![],
+                    env: BTreeMap::new(),
+                },
+            ),
         ])
         .await;
         let st = m.status();
@@ -861,10 +1064,24 @@ mod tests {
     #[test]
     fn long_and_colliding_names_are_unique() {
         let m = McpClientManager::new();
-        let mk = |n: &str| ToolDef { name: n.into(), title: None, description: String::new(), input_schema: json!({}), read_only: false, destructive: false };
+        let mk = |n: &str| ToolDef {
+            name: n.into(),
+            title: None,
+            description: String::new(),
+            input_schema: json!({}),
+            read_only: false,
+            destructive: false,
+        };
         let long_a = format!("{}a", "x".repeat(70));
         let long_b = format!("{}b", "x".repeat(70));
-        m.inner.entries.write().insert("s".into(), Entry { client: None, error: None, tools: vec![mk(&long_a), mk(&long_b), mk("a.b"), mk("a_b")] });
+        m.inner.entries.write().insert(
+            "s".into(),
+            Entry {
+                client: None,
+                error: None,
+                tools: vec![mk(&long_a), mk(&long_b), mk("a.b"), mk("a_b")],
+            },
+        );
         m.rebuild();
         let defs = ToolHandler::tools(&m);
         let set: std::collections::HashSet<_> = defs.iter().map(|d| d.name.clone()).collect();
@@ -872,13 +1089,16 @@ mod tests {
         assert!(defs.iter().all(|d| d.name.len() <= 64));
         // routes recover the original (unsanitized) tool names
         let snap = m.inner.snapshot.read();
-        let orig: std::collections::HashSet<_> = snap.routes.values().map(|(_, t)| t.clone()).collect();
+        let orig: std::collections::HashSet<_> =
+            snap.routes.values().map(|(_, t)| t.clone()).collect();
         assert!(orig.contains("a.b") && orig.contains(&long_a));
     }
 
     #[test]
     fn tool_output_parsing() {
-        let o = parse_tool_output(&json!({"content":[{"type":"text","text":"a"},{"type":"resource_link","uri":"file:///x"},{"type":"audio","data":"","mimeType":"a/b"}],"isError":true,"structuredContent":{"k":1}}));
+        let o = parse_tool_output(
+            &json!({"content":[{"type":"text","text":"a"},{"type":"resource_link","uri":"file:///x"},{"type":"audio","data":"","mimeType":"a/b"}],"isError":true,"structuredContent":{"k":1}}),
+        );
         assert!(o.is_error);
         assert_eq!(o.content.len(), 3);
         assert_eq!(o.structured, Some(json!({"k":1})));

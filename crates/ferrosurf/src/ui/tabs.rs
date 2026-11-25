@@ -44,20 +44,36 @@ fn snapshot(w: &BrowserWindow) -> Vec<TabView> {
 }
 
 fn tab_context_menu(ui: &mut Ui, id: TabId, pinned: bool, cmds: &mut Vec<Cmd>) {
-    if ui.button(format!("{}  Nueva pestaña a la derecha", icon::PLUS)).clicked() {
+    if ui
+        .button(format!("{}  Nueva pestaña a la derecha", icon::PLUS))
+        .clicked()
+    {
         cmds.push(Cmd::ActivateTab(id));
         cmds.push(Cmd::Action(Action::NewTab));
     }
-    if ui.button(format!("{}  Recargar", icon::ARROW_CLOCKWISE)).clicked() {
+    if ui
+        .button(format!("{}  Recargar", icon::ARROW_CLOCKWISE))
+        .clicked()
+    {
         cmds.push(Cmd::ReloadTab(id));
     }
     if ui.button(format!("{}  Duplicar", icon::COPY)).clicked() {
         cmds.push(Cmd::DuplicateTab(id));
     }
-    if ui.button(format!("{}  {}", icon::PUSH_PIN, if pinned { "Desfijar" } else { "Fijar" })).clicked() {
+    if ui
+        .button(format!(
+            "{}  {}",
+            icon::PUSH_PIN,
+            if pinned { "Desfijar" } else { "Fijar" }
+        ))
+        .clicked()
+    {
         cmds.push(Cmd::TogglePin(id));
     }
-    if ui.button(format!("{}  Añadir a marcadores", icon::STAR)).clicked() {
+    if ui
+        .button(format!("{}  Añadir a marcadores", icon::STAR))
+        .clicked()
+    {
         cmds.push(Cmd::ActivateTab(id));
         cmds.push(Cmd::Action(Action::BookmarkPage));
     }
@@ -71,21 +87,46 @@ fn tab_context_menu(ui: &mut Ui, id: TabId, pinned: bool, cmds: &mut Vec<Cmd>) {
     if ui.button("      Cerrar pestañas a la derecha").clicked() {
         cmds.push(Cmd::CloseTabsToRight(id));
     }
-    if ui.button(format!("{}  Reabrir pestaña cerrada", icon::ARROW_COUNTER_CLOCKWISE)).clicked() {
+    if ui
+        .button(format!(
+            "{}  Reabrir pestaña cerrada",
+            icon::ARROW_COUNTER_CLOCKWISE
+        ))
+        .clicked()
+    {
         cmds.push(Cmd::Action(Action::ReopenClosedTab));
     }
 }
 
-fn paint_tab(ui: &Ui, rect: Rect, t: &TabView, hovered: bool, pal: &Palette, compact: bool) -> Option<Rect> {
+fn paint_tab(
+    ui: &Ui,
+    rect: Rect,
+    t: &TabView,
+    hovered: bool,
+    pal: &Palette,
+    compact: bool,
+) -> Option<Rect> {
     let painter = ui.painter_at(rect.expand(2.0));
-    let radius = egui::CornerRadius { nw: 8, ne: 8, sw: 0, se: 0 };
+    let radius = egui::CornerRadius {
+        nw: 8,
+        ne: 8,
+        sw: 0,
+        se: 0,
+    };
     if t.active {
         painter.rect_filled(rect, radius, pal.tab_active);
     } else if hovered {
         painter.rect_filled(rect.shrink2(Vec2::new(1.0, 2.0)), 8.0, pal.tab_hover);
     }
     let icon_rect = Rect::from_center_size(
-        Pos2::new(if compact { rect.center().x } else { rect.left() + 18.0 }, rect.center().y),
+        Pos2::new(
+            if compact {
+                rect.center().x
+            } else {
+                rect.left() + 18.0
+            },
+            rect.center().y,
+        ),
         Vec2::splat(16.0),
     );
     if t.loading {
@@ -101,13 +142,29 @@ fn paint_tab(ui: &Ui, rect: Rect, t: &TabView, hovered: bool, pal: &Palette, com
         return None;
     }
     let close_visible = t.active || hovered;
-    let close_rect = Rect::from_center_size(Pos2::new(rect.right() - 16.0, rect.center().y), Vec2::splat(18.0));
-    let mut text_right = if close_visible { close_rect.left() - 4.0 } else { rect.right() - 10.0 };
+    let close_rect = Rect::from_center_size(
+        Pos2::new(rect.right() - 16.0, rect.center().y),
+        Vec2::splat(18.0),
+    );
+    let mut text_right = if close_visible {
+        close_rect.left() - 4.0
+    } else {
+        rect.right() - 10.0
+    };
     if t.audible {
-        painter.text(Pos2::new(text_right - 8.0, rect.center().y), egui::Align2::CENTER_CENTER, icon::SPEAKER_HIGH, egui::FontId::proportional(13.0), pal.text_dim);
+        painter.text(
+            Pos2::new(text_right - 8.0, rect.center().y),
+            egui::Align2::CENTER_CENTER,
+            icon::SPEAKER_HIGH,
+            egui::FontId::proportional(13.0),
+            pal.text_dim,
+        );
         text_right -= 18.0;
     }
-    let text_rect = Rect::from_min_max(Pos2::new(icon_rect.right() + 8.0, rect.top()), Pos2::new(text_right, rect.bottom()));
+    let text_rect = Rect::from_min_max(
+        Pos2::new(icon_rect.right() + 8.0, rect.top()),
+        Pos2::new(text_right, rect.bottom()),
+    );
     let color = if t.active { pal.text } else { pal.text_dim };
     let galley = painter.layout_no_wrap(t.title.clone(), egui::FontId::proportional(12.5), color);
     let text_pos = Pos2::new(text_rect.left(), rect.center().y - galley.size().y / 2.0);
@@ -115,8 +172,17 @@ fn paint_tab(ui: &Ui, rect: Rect, t: &TabView, hovered: bool, pal: &Palette, com
     clip.galley(text_pos, galley.clone(), color);
     // Fade-out instead of hard clipping.
     if galley.size().x > text_rect.width() {
-        let bg = if t.active { pal.tab_active } else if hovered { pal.tab_hover } else { pal.bg };
-        let fade = Rect::from_min_max(Pos2::new(text_rect.right() - 24.0, rect.top() + 2.0), Pos2::new(text_rect.right(), rect.bottom() - 2.0));
+        let bg = if t.active {
+            pal.tab_active
+        } else if hovered {
+            pal.tab_hover
+        } else {
+            pal.bg
+        };
+        let fade = Rect::from_min_max(
+            Pos2::new(text_rect.right() - 24.0, rect.top() + 2.0),
+            Pos2::new(text_rect.right(), rect.bottom() - 2.0),
+        );
         let mut mesh = egui::Mesh::default();
         mesh.colored_vertex(fade.left_top(), Color32::TRANSPARENT);
         mesh.colored_vertex(fade.right_top(), bg);
@@ -161,24 +227,43 @@ pub fn tab_strip(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &mut V
         let drag_id = w.chrome.tab_drag.as_ref().map(|d| d.id);
         for t in &tabs {
             let width = if t.pinned { pinned_w } else { tab_w };
-            let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, height), Sense::click_and_drag());
+            let (rect, resp) =
+                ui.allocate_exact_size(Vec2::new(width, height), Sense::click_and_drag());
             rects.push(rect);
             let hovered = resp.hovered();
             let compact = t.pinned || width < 70.0;
             let mut paint_rect = rect;
             if drag_id == Some(t.id) {
                 if let Some(p) = ui.ctx().pointer_interact_pos() {
-                    let off = w.chrome.tab_drag.as_ref().map(|d| d.grab_offset).unwrap_or(0.0);
+                    let off = w
+                        .chrome
+                        .tab_drag
+                        .as_ref()
+                        .map(|d| d.grab_offset)
+                        .unwrap_or(0.0);
                     paint_rect = rect.translate(Vec2::new(p.x - off - rect.left(), 0.0));
                 }
             }
-            let close_rect = paint_tab(ui, paint_rect, t, hovered, &pal, compact && !(t.active && !t.pinned && width >= 48.0));
+            let close_rect = paint_tab(
+                ui,
+                paint_rect,
+                t,
+                hovered,
+                &pal,
+                compact && !(t.active && !t.pinned && width >= 48.0),
+            );
             let close_hover = close_rect.is_some_and(|r| ui.rect_contains_pointer(r));
             if let Some(cr) = close_rect {
                 if close_hover {
                     ui.painter().rect_filled(cr, 9.0, pal.field);
                 }
-                ui.painter().text(cr.center(), egui::Align2::CENTER_CENTER, icon::X, egui::FontId::proportional(12.0), pal.text_dim);
+                ui.painter().text(
+                    cr.center(),
+                    egui::Align2::CENTER_CENTER,
+                    icon::X,
+                    egui::FontId::proportional(12.0),
+                    pal.text_dim,
+                );
             }
             if resp.clicked() {
                 if close_hover {
@@ -191,8 +276,15 @@ pub fn tab_strip(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &mut V
                 cmds.push(Cmd::CloseTab(t.id));
             }
             if resp.drag_started() {
-                let grab = ui.ctx().pointer_interact_pos().map(|p| p.x - rect.left()).unwrap_or(0.0);
-                w.chrome.tab_drag = Some(TabDrag { id: t.id, grab_offset: grab });
+                let grab = ui
+                    .ctx()
+                    .pointer_interact_pos()
+                    .map(|p| p.x - rect.left())
+                    .unwrap_or(0.0);
+                w.chrome.tab_drag = Some(TabDrag {
+                    id: t.id,
+                    grab_offset: grab,
+                });
                 cmds.push(Cmd::ActivateTab(t.id));
             }
             let title = t.title.clone();
@@ -208,11 +300,16 @@ pub fn tab_strip(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &mut V
             let released = ui.input(|i| i.pointer.any_released());
             if let Some(p) = ui.ctx().pointer_interact_pos() {
                 if let Some(from) = tabs.iter().position(|t| t.id == drag.id) {
-                    let mut to = rects.iter().position(|r| p.x < r.center().x).unwrap_or(rects.len());
+                    let mut to = rects
+                        .iter()
+                        .position(|r| p.x < r.center().x)
+                        .unwrap_or(rects.len());
                     if to > from {
                         to -= 1;
                     }
-                    if to != from && tabs[from].pinned == tabs.get(to).map(|t| t.pinned).unwrap_or(false) {
+                    if to != from
+                        && tabs[from].pinned == tabs.get(to).map(|t| t.pinned).unwrap_or(false)
+                    {
                         cmds.push(Cmd::MoveTab { from, to });
                     }
                 }
@@ -233,20 +330,33 @@ pub fn tab_strip(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &mut V
             cmds.push(Cmd::Action(Action::NewTab));
         }
         resp.context_menu(|ui| {
-            if ui.button(format!("{}  Nueva pestaña", icon::PLUS)).clicked() {
+            if ui
+                .button(format!("{}  Nueva pestaña", icon::PLUS))
+                .clicked()
+            {
                 cmds.push(Cmd::Action(Action::NewTab));
             }
-            if ui.button(format!("{}  Reabrir pestaña cerrada", icon::ARROW_COUNTER_CLOCKWISE)).clicked() {
+            if ui
+                .button(format!(
+                    "{}  Reabrir pestaña cerrada",
+                    icon::ARROW_COUNTER_CLOCKWISE
+                ))
+                .clicked()
+            {
                 cmds.push(Cmd::Action(Action::ReopenClosedTab));
             }
-            if ui.button(format!("{}  Pestañas verticales", icon::SIDEBAR)).clicked() {
+            if ui
+                .button(format!("{}  Pestañas verticales", icon::SIDEBAR))
+                .clicked()
+            {
                 cmds.push(Cmd::Action(Action::ToggleVerticalTabs));
             }
         });
     });
     // Animate spinners.
     if tabs.iter().any(|t| t.loading) {
-        ui.ctx().request_repaint_after(std::time::Duration::from_millis(33));
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(33));
     }
 }
 
@@ -276,7 +386,12 @@ pub fn vertical_tabs(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &m
                 let (rect, resp) = ui.allocate_exact_size(Vec2::new(40.0, 34.0), Sense::click());
                 paint_tab(ui, rect, t, resp.hovered(), &pal, true);
                 if t.active {
-                    ui.painter().rect_stroke(rect, 8.0, Stroke::new(1.5, pal.accent), egui::StrokeKind::Inside);
+                    ui.painter().rect_stroke(
+                        rect,
+                        8.0,
+                        Stroke::new(1.5, pal.accent),
+                        egui::StrokeKind::Inside,
+                    );
                 }
                 if resp.clicked() {
                     cmds.push(Cmd::ActivateTab(t.id));
@@ -284,70 +399,129 @@ pub fn vertical_tabs(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &m
                 if resp.middle_clicked() {
                     cmds.push(Cmd::CloseTab(t.id));
                 }
-                resp.on_hover_text(&t.title).context_menu(|ui| tab_context_menu(ui, t.id, true, cmds));
+                resp.on_hover_text(&t.title)
+                    .context_menu(|ui| tab_context_menu(ui, t.id, true, cmds));
             }
         });
         ui.separator();
     }
     let new_tab = ui.add_sized(
         [ui.available_width(), 30.0],
-        egui::Button::new(if narrow { icon::PLUS.to_string() } else { format!("{}  Nueva pestaña", icon::PLUS) }).fill(Color32::TRANSPARENT),
+        egui::Button::new(if narrow {
+            icon::PLUS.to_string()
+        } else {
+            format!("{}  Nueva pestaña", icon::PLUS)
+        })
+        .fill(Color32::TRANSPARENT),
     );
     if new_tab.clicked() {
         cmds.push(Cmd::Action(Action::NewTab));
     }
-    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-        for (i, t) in tabs.iter().enumerate().filter(|(_, t)| !t.pinned) {
-            let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 32.0), Sense::click_and_drag());
-            let hovered = resp.hovered();
-            let painter = ui.painter();
-            if t.active {
-                painter.rect_filled(rect, 8.0, pal.toolbar);
-                painter.rect_filled(Rect::from_min_size(rect.left_top() + Vec2::new(0.0, 8.0), Vec2::new(3.0, 16.0)), 2.0, pal.accent);
-            } else if hovered {
-                painter.rect_filled(rect, 8.0, pal.tab_hover);
-            }
-            let icon_rect = Rect::from_center_size(Pos2::new(rect.left() + 18.0, rect.center().y), Vec2::splat(16.0));
-            if t.loading {
-                widgets::paint_spinner(painter, icon_rect.center(), 6.5, pal.accent, ui.input(|i| i.time));
-            } else {
-                widgets::paint_site_icon(painter, icon_rect, t.favicon.as_ref(), &t.title, &t.url);
-            }
-            let close_rect = Rect::from_center_size(Pos2::new(rect.right() - 16.0, rect.center().y), Vec2::splat(18.0));
-            let close_hover = ui.rect_contains_pointer(close_rect) && (hovered || t.active);
-            if !narrow {
-                let text_rect = Rect::from_min_max(Pos2::new(icon_rect.right() + 8.0, rect.top()), Pos2::new(close_rect.left() - 4.0, rect.bottom()));
-                let color = if t.active { pal.text } else { pal.text_dim };
-                let galley = painter.layout_no_wrap(t.title.clone(), egui::FontId::proportional(12.5), color);
-                painter.with_clip_rect(text_rect).galley(Pos2::new(text_rect.left(), rect.center().y - galley.size().y / 2.0), galley, color);
-                if hovered || t.active {
-                    if close_hover {
-                        painter.rect_filled(close_rect, 9.0, pal.field);
-                    }
-                    painter.text(close_rect.center(), egui::Align2::CENTER_CENTER, icon::X, egui::FontId::proportional(12.0), pal.text_dim);
+    egui::ScrollArea::vertical()
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            for (i, t) in tabs.iter().enumerate().filter(|(_, t)| !t.pinned) {
+                let (rect, resp) = ui.allocate_exact_size(
+                    Vec2::new(ui.available_width(), 32.0),
+                    Sense::click_and_drag(),
+                );
+                let hovered = resp.hovered();
+                let painter = ui.painter();
+                if t.active {
+                    painter.rect_filled(rect, 8.0, pal.toolbar);
+                    painter.rect_filled(
+                        Rect::from_min_size(
+                            rect.left_top() + Vec2::new(0.0, 8.0),
+                            Vec2::new(3.0, 16.0),
+                        ),
+                        2.0,
+                        pal.accent,
+                    );
+                } else if hovered {
+                    painter.rect_filled(rect, 8.0, pal.tab_hover);
                 }
-            }
-            if resp.clicked() {
-                cmds.push(if close_hover && !narrow { Cmd::CloseTab(t.id) } else { Cmd::ActivateTab(t.id) });
-            }
-            if resp.middle_clicked() {
-                cmds.push(Cmd::CloseTab(t.id));
-            }
-            if resp.dragged() {
-                if let Some(p) = ui.ctx().pointer_interact_pos() {
-                    if p.y < rect.top() - 4.0 && i > 0 {
-                        cmds.push(Cmd::MoveTab { from: i, to: i - 1 });
-                    } else if p.y > rect.bottom() + 4.0 && i + 1 < tabs.len() {
-                        cmds.push(Cmd::MoveTab { from: i, to: i + 1 });
+                let icon_rect = Rect::from_center_size(
+                    Pos2::new(rect.left() + 18.0, rect.center().y),
+                    Vec2::splat(16.0),
+                );
+                if t.loading {
+                    widgets::paint_spinner(
+                        painter,
+                        icon_rect.center(),
+                        6.5,
+                        pal.accent,
+                        ui.input(|i| i.time),
+                    );
+                } else {
+                    widgets::paint_site_icon(
+                        painter,
+                        icon_rect,
+                        t.favicon.as_ref(),
+                        &t.title,
+                        &t.url,
+                    );
+                }
+                let close_rect = Rect::from_center_size(
+                    Pos2::new(rect.right() - 16.0, rect.center().y),
+                    Vec2::splat(18.0),
+                );
+                let close_hover = ui.rect_contains_pointer(close_rect) && (hovered || t.active);
+                if !narrow {
+                    let text_rect = Rect::from_min_max(
+                        Pos2::new(icon_rect.right() + 8.0, rect.top()),
+                        Pos2::new(close_rect.left() - 4.0, rect.bottom()),
+                    );
+                    let color = if t.active { pal.text } else { pal.text_dim };
+                    let galley = painter.layout_no_wrap(
+                        t.title.clone(),
+                        egui::FontId::proportional(12.5),
+                        color,
+                    );
+                    painter.with_clip_rect(text_rect).galley(
+                        Pos2::new(text_rect.left(), rect.center().y - galley.size().y / 2.0),
+                        galley,
+                        color,
+                    );
+                    if hovered || t.active {
+                        if close_hover {
+                            painter.rect_filled(close_rect, 9.0, pal.field);
+                        }
+                        painter.text(
+                            close_rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            icon::X,
+                            egui::FontId::proportional(12.0),
+                            pal.text_dim,
+                        );
                     }
                 }
+                if resp.clicked() {
+                    cmds.push(if close_hover && !narrow {
+                        Cmd::CloseTab(t.id)
+                    } else {
+                        Cmd::ActivateTab(t.id)
+                    });
+                }
+                if resp.middle_clicked() {
+                    cmds.push(Cmd::CloseTab(t.id));
+                }
+                if resp.dragged() {
+                    if let Some(p) = ui.ctx().pointer_interact_pos() {
+                        if p.y < rect.top() - 4.0 && i > 0 {
+                            cmds.push(Cmd::MoveTab { from: i, to: i - 1 });
+                        } else if p.y > rect.bottom() + 4.0 && i + 1 < tabs.len() {
+                            cmds.push(Cmd::MoveTab { from: i, to: i + 1 });
+                        }
+                    }
+                }
+                let title = t.title.clone();
+                resp.on_hover_text(title)
+                    .context_menu(|ui| tab_context_menu(ui, t.id, false, cmds));
             }
-            let title = t.title.clone();
-            resp.on_hover_text(title).context_menu(|ui| tab_context_menu(ui, t.id, false, cmds));
-        }
-    });
+        });
     if tabs.iter().any(|t| t.loading) {
-        ui.ctx().request_repaint_after(std::time::Duration::from_millis(33));
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(33));
     }
     let _ = AppCmd::Quit; // keep import used in all cfgs
 }

@@ -54,9 +54,9 @@ pub fn html_unescape(s: &str) -> String {
             "gt" => Some('>'),
             "quot" => Some('"'),
             "apos" | "#39" => Some('\''),
-            e if e.starts_with("#x") || e.starts_with("#X") => {
-                u32::from_str_radix(&e[2..], 16).ok().and_then(char::from_u32)
-            },
+            e if e.starts_with("#x") || e.starts_with("#X") => u32::from_str_radix(&e[2..], 16)
+                .ok()
+                .and_then(char::from_u32),
             e if e.starts_with('#') => e[1..].parse().ok().and_then(char::from_u32),
             _ => None,
         };
@@ -64,11 +64,11 @@ pub fn html_unescape(s: &str) -> String {
             Some(c) => {
                 out.push(c);
                 rest = &rest[end + 1..];
-            },
+            }
             None => {
                 out.push('&');
                 rest = &rest[1..];
-            },
+            }
         }
     }
     out.push_str(rest);
@@ -108,7 +108,10 @@ mod tests {
     fn scoring() {
         assert!(match_score("rust", "The Rust Book").is_some());
         assert!(match_score("rust go", "The Rust Book").is_none());
-        assert!(match_score("rust", "rust-lang.org").unwrap() > match_score("rust", "trust me").unwrap());
+        assert!(
+            match_score("rust", "rust-lang.org").unwrap()
+                > match_score("rust", "trust me").unwrap()
+        );
     }
 
     #[test]

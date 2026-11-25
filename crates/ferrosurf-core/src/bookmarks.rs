@@ -105,7 +105,10 @@ impl BookmarkNode {
     }
 
     fn max_id(&self) -> BookmarkId {
-        self.children().iter().map(|c| c.max_id()).fold(self.id(), BookmarkId::max)
+        self.children()
+            .iter()
+            .map(|c| c.max_id())
+            .fold(self.id(), BookmarkId::max)
     }
 }
 
@@ -154,7 +157,13 @@ impl BookmarkStore {
             next_id: 0,
             revision: 0,
         };
-        store.next_id = store.data.toolbar.max_id().max(store.data.other.max_id()).max(OTHER_ID) + 1;
+        store.next_id = store
+            .data
+            .toolbar
+            .max_id()
+            .max(store.data.other.max_id())
+            .max(OTHER_ID)
+            + 1;
         store
     }
 
@@ -174,9 +183,10 @@ impl BookmarkStore {
     fn changed(&mut self) {
         self.revision += 1;
         if let Some(path) = &self.path
-            && let Err(e) = write_json(path, &self.data) {
-                log::error!("Failed to save bookmarks: {e}");
-            }
+            && let Err(e) = write_json(path, &self.data)
+        {
+            log::error!("Failed to save bookmarks: {e}");
+        }
     }
 
     fn alloc_id(&mut self) -> BookmarkId {
@@ -198,7 +208,10 @@ impl BookmarkStore {
     }
 
     pub fn get(&self, id: BookmarkId) -> Option<&BookmarkNode> {
-        self.data.toolbar.find(id).or_else(|| self.data.other.find(id))
+        self.data
+            .toolbar
+            .find(id)
+            .or_else(|| self.data.other.find(id))
     }
 
     fn get_mut(&mut self, id: BookmarkId) -> Option<&mut BookmarkNode> {
@@ -233,11 +246,20 @@ impl BookmarkStore {
     }
 
     /// Add a bookmark to `parent` (a folder id), returning its id.
-    pub fn add(&mut self, parent: BookmarkId, title: &str, url: &str) -> anyhow::Result<BookmarkId> {
+    pub fn add(
+        &mut self,
+        parent: BookmarkId,
+        title: &str,
+        url: &str,
+    ) -> anyhow::Result<BookmarkId> {
         let id = self.alloc_id();
         let node = BookmarkNode::Bookmark(Bookmark {
             id,
-            title: if title.trim().is_empty() { url.to_string() } else { title.trim().to_string() },
+            title: if title.trim().is_empty() {
+                url.to_string()
+            } else {
+                title.trim().to_string()
+            },
             url: url.to_string(),
             tags: vec![],
             added_ms: crate::now_ms(),
@@ -260,13 +282,18 @@ impl BookmarkStore {
         Ok(id)
     }
 
-    fn insert(&mut self, parent: BookmarkId, node: BookmarkNode, index: Option<usize>) -> anyhow::Result<()> {
+    fn insert(
+        &mut self,
+        parent: BookmarkId,
+        node: BookmarkNode,
+        index: Option<usize>,
+    ) -> anyhow::Result<()> {
         match self.get_mut(parent) {
             Some(BookmarkNode::Folder { children, .. }) => {
                 let idx = index.unwrap_or(children.len()).min(children.len());
                 children.insert(idx, node);
                 Ok(())
-            },
+            }
             _ => anyhow::bail!("parent {parent} is not a folder"),
         }
     }
@@ -283,7 +310,10 @@ impl BookmarkStore {
     }
 
     pub fn remove(&mut self, id: BookmarkId) -> anyhow::Result<BookmarkNode> {
-        anyhow::ensure!(id != TOOLBAR_ID && id != OTHER_ID, "cannot remove a root folder");
+        anyhow::ensure!(
+            id != TOOLBAR_ID && id != OTHER_ID,
+            "cannot remove a root folder"
+        );
         let node = self
             .data
             .toolbar
@@ -304,13 +334,19 @@ impl BookmarkStore {
         Ok(())
     }
 
-    pub fn update(&mut self, id: BookmarkId, title: &str, url: &str, tags: Vec<String>) -> anyhow::Result<()> {
+    pub fn update(
+        &mut self,
+        id: BookmarkId,
+        title: &str,
+        url: &str,
+        tags: Vec<String>,
+    ) -> anyhow::Result<()> {
         match self.get_mut(id) {
             Some(BookmarkNode::Bookmark(b)) => {
                 b.title = title.to_string();
                 b.url = url.to_string();
                 b.tags = tags;
-            },
+            }
             _ => anyhow::bail!("no bookmark {id}"),
         }
         self.changed();
@@ -318,10 +354,21 @@ impl BookmarkStore {
     }
 
     /// Move node `id` into folder `new_parent` at `index` (append if None).
-    pub fn move_to(&mut self, id: BookmarkId, new_parent: BookmarkId, index: Option<usize>) -> anyhow::Result<()> {
-        anyhow::ensure!(id != TOOLBAR_ID && id != OTHER_ID, "cannot move a root folder");
+    pub fn move_to(
+        &mut self,
+        id: BookmarkId,
+        new_parent: BookmarkId,
+        index: Option<usize>,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            id != TOOLBAR_ID && id != OTHER_ID,
+            "cannot move a root folder"
+        );
         if let Some(node) = self.get(id) {
-            anyhow::ensure!(!node.contains(new_parent), "cannot move a folder into itself");
+            anyhow::ensure!(
+                !node.contains(new_parent),
+                "cannot move a folder into itself"
+            );
         }
         anyhow::ensure!(
             matches!(self.get(new_parent), Some(BookmarkNode::Folder { .. })),
@@ -341,8 +388,18 @@ impl BookmarkStore {
     /// All folders as (id, indented path) pairs, for "choose folder" pickers.
     pub fn folders(&self) -> Vec<(BookmarkId, String)> {
         fn rec(node: &BookmarkNode, prefix: &str, out: &mut Vec<(BookmarkId, String)>) {
-            if let BookmarkNode::Folder { id, title, children, .. } = node {
-                let path = if prefix.is_empty() { title.clone() } else { format!("{prefix} / {title}") };
+            if let BookmarkNode::Folder {
+                id,
+                title,
+                children,
+                ..
+            } = node
+            {
+                let path = if prefix.is_empty() {
+                    title.clone()
+                } else {
+                    format!("{prefix} / {title}")
+                };
                 out.push((*id, path.clone()));
                 children.iter().for_each(|c| rec(c, &path, out));
             }
@@ -379,9 +436,18 @@ impl BookmarkStore {
                         b.added_ms / 1000,
                         html_escape(&b.title)
                     ));
-                },
-                BookmarkNode::Folder { title, children, added_ms, .. } => {
-                    let extra = if toolbar { " PERSONAL_TOOLBAR_FOLDER=\"true\"" } else { "" };
+                }
+                BookmarkNode::Folder {
+                    title,
+                    children,
+                    added_ms,
+                    ..
+                } => {
+                    let extra = if toolbar {
+                        " PERSONAL_TOOLBAR_FOLDER=\"true\""
+                    } else {
+                        ""
+                    };
                     out.push_str(&format!(
                         "{pad}<DT><H3 ADD_DATE=\"{}\"{extra}>{}</H3>\n{pad}<DL><p>\n",
                         added_ms / 1000,
@@ -391,7 +457,7 @@ impl BookmarkStore {
                         rec(c, depth + 1, out, false);
                     }
                     out.push_str(&format!("{pad}</DL><p>\n"));
-                },
+                }
             }
         }
         let mut out = String::from(
@@ -446,14 +512,26 @@ impl BookmarkStore {
                 let href = attr(raw_tag, "href").unwrap_or_default();
                 let close = lower[end..].find("</a").map(|e| end + e).unwrap_or(end);
                 let title = html_unescape(html[end..close].trim());
-                if !href.is_empty() && !href.starts_with("javascript:") && !href.starts_with("place:") {
+                if !href.is_empty()
+                    && !href.starts_with("javascript:")
+                    && !href.starts_with("place:")
+                {
                     let id = self.alloc_id();
                     let node = BookmarkNode::Bookmark(Bookmark {
                         id,
-                        title: if title.is_empty() { href.clone() } else { title },
+                        title: if title.is_empty() {
+                            href.clone()
+                        } else {
+                            title
+                        },
                         url: href,
                         tags: attr(raw_tag, "tags")
-                            .map(|t| t.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
+                            .map(|t| {
+                                t.split(',')
+                                    .map(|s| s.trim().to_string())
+                                    .filter(|s| !s.is_empty())
+                                    .collect()
+                            })
                             .unwrap_or_default(),
                         added_ms: attr(raw_tag, "add_date")
                             .and_then(|d| d.parse::<i64>().ok())
@@ -473,7 +551,11 @@ impl BookmarkStore {
     }
 
     /// Import a list of (folder path, title, url) entries, used by browser importers.
-    pub fn import_entries(&mut self, folder_title: &str, entries: &[(Vec<String>, String, String)]) -> anyhow::Result<usize> {
+    pub fn import_entries(
+        &mut self,
+        folder_title: &str,
+        entries: &[(Vec<String>, String, String)],
+    ) -> anyhow::Result<usize> {
         let root = self.add_folder(OTHER_ID, folder_title)?;
         let mut folder_ids: std::collections::HashMap<Vec<String>, BookmarkId> = Default::default();
         for (path, title, url) in entries {
@@ -486,13 +568,19 @@ impl BookmarkStore {
                         let id = self.add_folder(parent, &path[depth - 1])?;
                         folder_ids.insert(key, id);
                         id
-                    },
+                    }
                 };
             }
             let id = self.alloc_id();
             self.insert(
                 parent,
-                BookmarkNode::Bookmark(Bookmark { id, title: title.clone(), url: url.clone(), tags: vec![], added_ms: crate::now_ms() }),
+                BookmarkNode::Bookmark(Bookmark {
+                    id,
+                    title: title.clone(),
+                    url: url.clone(),
+                    tags: vec![],
+                    added_ms: crate::now_ms(),
+                }),
                 None,
             )?;
         }
@@ -548,7 +636,10 @@ mod tests {
         drop(s);
         let s = BookmarkStore::open(path);
         assert_eq!(s.len(), n);
-        assert_eq!(s.find_by_url("https://rust-lang.org").unwrap().title, "https://rust-lang.org");
+        assert_eq!(
+            s.find_by_url("https://rust-lang.org").unwrap().title,
+            "https://rust-lang.org"
+        );
         assert!(s.next_id > b);
         assert_eq!(s.search("rust", 5).len(), 1);
         assert_eq!(s.folders().len(), 3);
@@ -558,7 +649,8 @@ mod tests {
     fn html_roundtrip() {
         let mut s = BookmarkStore::in_memory();
         let f = s.add_folder(TOOLBAR_ID, "A & B").unwrap();
-        s.add(f, "Tom's <page>", "https://example.com/?a=1&b=2").unwrap();
+        s.add(f, "Tom's <page>", "https://example.com/?a=1&b=2")
+            .unwrap();
         s.add(OTHER_ID, "Other", "https://other.example").unwrap();
         let html = s.export_html();
         let mut t = BookmarkStore::in_memory();
@@ -573,10 +665,14 @@ mod tests {
     #[test]
     fn import_entries() {
         let mut s = BookmarkStore::in_memory();
-        s.import_entries("From Chrome", &[
-            (vec!["x".into(), "y".into()], "t".into(), "https://a".into()),
-            (vec!["x".into()], "t2".into(), "https://b".into()),
-        ]).unwrap();
+        s.import_entries(
+            "From Chrome",
+            &[
+                (vec!["x".into(), "y".into()], "t".into(), "https://a".into()),
+                (vec!["x".into()], "t2".into(), "https://b".into()),
+            ],
+        )
+        .unwrap();
         assert_eq!(s.len(), 2);
         assert_eq!(s.folders().len(), 5);
     }

@@ -1265,6 +1265,7 @@ fn mcp(ui: &mut Ui, st: &mut SettingsState, env: &mut Env, cmds: &mut Vec<Cmd>) 
     let mcp_url = env.shared.mcp_url.clone();
     let profile_id = env.profile.profile.id.clone();
     let mut reconnect = false;
+    let mut restart = false;
     {
         let m = &mut env.profile.settings.mcp_server;
         widgets::section(ui, "Servidor MCP de FerroSurf");
@@ -1314,8 +1315,7 @@ fn mcp(ui: &mut Ui, st: &mut SettingsState, env: &mut Env, cmds: &mut Vec<Cmd>) 
             )
             .clicked()
             {
-                env.profile.flush_settings();
-                cmds.push(Cmd::App(AppCmd::RestartMcpServer));
+                restart = true;
             }
         });
     }
@@ -1524,6 +1524,11 @@ fn mcp(ui: &mut Ui, st: &mut SettingsState, env: &mut Env, cmds: &mut Vec<Cmd>) 
         }
     });
 
+    if restart {
+        env.profile.mark_settings_dirty();
+        env.profile.flush_settings();
+        cmds.push(Cmd::App(AppCmd::RestartMcpServer));
+    }
     if reconnect {
         env.profile.mark_settings_dirty();
         env.profile.flush_settings();

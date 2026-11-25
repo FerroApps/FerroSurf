@@ -8,7 +8,11 @@ use crate::search::SearchEngine;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Interpretation {
     Navigate(Url),
-    Search { engine_id: String, terms: String, url: Url },
+    Search {
+        engine_id: String,
+        terms: String,
+        url: Url,
+    },
 }
 
 impl Interpretation {
@@ -21,7 +25,17 @@ impl Interpretation {
 }
 
 const KNOWN_SCHEMES: &[&str] = &[
-    "http", "https", "file", "data", "about", "ferro", "view-source", "blob", "ftp", "ws", "wss",
+    "http",
+    "https",
+    "file",
+    "data",
+    "about",
+    "ferro",
+    "view-source",
+    "blob",
+    "ftp",
+    "ws",
+    "wss",
 ];
 
 /// Common TLDs used to decide whether `foo.bar` looks like a host.
@@ -30,7 +44,11 @@ fn looks_like_tld(tld: &str) -> bool {
 }
 
 /// Interpret raw omnibox input as either a URL or a search.
-pub fn interpret(input: &str, default_engine: &SearchEngine, engines: &[SearchEngine]) -> Option<Interpretation> {
+pub fn interpret(
+    input: &str,
+    default_engine: &SearchEngine,
+    engines: &[SearchEngine],
+) -> Option<Interpretation> {
     let input = input.trim();
     if input.is_empty() {
         return None;
@@ -38,16 +56,19 @@ pub fn interpret(input: &str, default_engine: &SearchEngine, engines: &[SearchEn
 
     // Keyword search: "w rust language"
     if let Some((kw, rest)) = input.split_once(' ')
-        && let Some(engine) = engines.iter().find(|e| !e.keyword.is_empty() && e.keyword == kw) {
-            let terms = rest.trim();
-            if !terms.is_empty() {
-                return Some(Interpretation::Search {
-                    engine_id: engine.id.clone(),
-                    terms: terms.to_string(),
-                    url: engine.search_url(terms)?,
-                });
-            }
+        && let Some(engine) = engines
+            .iter()
+            .find(|e| !e.keyword.is_empty() && e.keyword == kw)
+    {
+        let terms = rest.trim();
+        if !terms.is_empty() {
+            return Some(Interpretation::Search {
+                engine_id: engine.id.clone(),
+                terms: terms.to_string(),
+                url: engine.search_url(terms)?,
+            });
         }
+    }
 
     // "?query" forces a search.
     if let Some(q) = input.strip_prefix('?') {
@@ -56,9 +77,10 @@ pub fn interpret(input: &str, default_engine: &SearchEngine, engines: &[SearchEn
     }
 
     if !input.contains(char::is_whitespace)
-        && let Some(url) = as_url(input) {
-            return Some(Interpretation::Navigate(url));
-        }
+        && let Some(url) = as_url(input)
+    {
+        return Some(Interpretation::Navigate(url));
+    }
 
     Some(search(default_engine, input))
 }
@@ -77,9 +99,10 @@ fn search(engine: &SearchEngine, terms: &str) -> Interpretation {
 pub fn as_url(input: &str) -> Option<Url> {
     // Explicit scheme.
     if let Some((scheme, _)) = input.split_once(':')
-        && KNOWN_SCHEMES.contains(&scheme.to_ascii_lowercase().as_str()) {
-            return Url::parse(input).ok();
-        }
+        && KNOWN_SCHEMES.contains(&scheme.to_ascii_lowercase().as_str())
+    {
+        return Url::parse(input).ok();
+    }
     // Absolute file paths.
     if input.starts_with('/') || input.starts_with("~/") {
         let path = if let Some(rest) = input.strip_prefix("~/") {
@@ -90,7 +113,10 @@ pub fn as_url(input: &str) -> Option<Url> {
         return Url::from_file_path(path).ok();
     }
     #[cfg(windows)]
-    if input.len() > 2 && input.as_bytes()[1] == b':' && (input.as_bytes()[2] == b'\\' || input.as_bytes()[2] == b'/') {
+    if input.len() > 2
+        && input.as_bytes()[1] == b':'
+        && (input.as_bytes()[2] == b'\\' || input.as_bytes()[2] == b'/')
+    {
         return Url::from_file_path(input).ok();
     }
 
@@ -101,8 +127,8 @@ pub fn as_url(input: &str) -> Option<Url> {
         _ => host_port,
     };
     let is_localhost = host.eq_ignore_ascii_case("localhost") || host.ends_with(".localhost");
-    let is_ip = host.parse::<std::net::IpAddr>().is_ok()
-        || (host.starts_with('[') && host.ends_with(']'));
+    let is_ip =
+        host.parse::<std::net::IpAddr>().is_ok() || (host.starts_with('[') && host.ends_with(']'));
     let is_domain = host.contains('.')
         && !host.starts_with('.')
         && !host.ends_with('.')
@@ -111,7 +137,11 @@ pub fn as_url(input: &str) -> Option<Url> {
             .all(|c| c.is_alphanumeric() || c == '-' || c == '.')
         && host.rsplit('.').next().is_some_and(looks_like_tld);
     if is_localhost || is_ip || is_domain {
-        let scheme = if is_localhost || is_ip { "http" } else { "https" };
+        let scheme = if is_localhost || is_ip {
+            "http"
+        } else {
+            "https"
+        };
         return Url::parse(&format!("{scheme}://{input}")).ok();
     }
     None
@@ -123,7 +153,10 @@ pub fn https_upgrade(url: &Url) -> Option<Url> {
         return None;
     }
     let host = url.host_str()?;
-    if host == "localhost" || host.ends_with(".localhost") || host.parse::<std::net::IpAddr>().is_ok() {
+    if host == "localhost"
+        || host.ends_with(".localhost")
+        || host.parse::<std::net::IpAddr>().is_ok()
+    {
         return None;
     }
     let mut u = url.clone();
@@ -167,7 +200,10 @@ fn normalize_for_dedup(url: &str) -> String {
 }
 
 /// Inline autocompletion: if `input` is a prefix of a known host, return the completion.
-pub fn inline_completion<'a>(input: &str, candidates: impl IntoIterator<Item = &'a str>) -> Option<String> {
+pub fn inline_completion<'a>(
+    input: &str,
+    candidates: impl IntoIterator<Item = &'a str>,
+) -> Option<String> {
     if input.is_empty() || input.contains(' ') {
         return None;
     }
@@ -195,7 +231,10 @@ mod tests {
     #[test]
     fn urls() {
         assert_eq!(go("example.com").url().as_str(), "https://example.com/");
-        assert_eq!(go("localhost:3000/x").url().as_str(), "http://localhost:3000/x");
+        assert_eq!(
+            go("localhost:3000/x").url().as_str(),
+            "http://localhost:3000/x"
+        );
         assert_eq!(go("127.0.0.1").url().as_str(), "http://127.0.0.1/");
         assert_eq!(go("about:blank").url().as_str(), "about:blank");
         assert_eq!(go("ferro://settings").url().as_str(), "ferro://settings");
@@ -209,10 +248,12 @@ mod tests {
         assert!(matches!(go("hello"), Interpretation::Search { .. }));
         assert!(matches!(go("?example.com"), Interpretation::Search { .. }));
         match go("w rust language") {
-            Interpretation::Search { engine_id, terms, .. } => {
+            Interpretation::Search {
+                engine_id, terms, ..
+            } => {
                 assert_eq!(engine_id, "wikipedia");
                 assert_eq!(terms, "rust language");
-            },
+            }
             other => panic!("{other:?}"),
         }
         // file.rs is not a domain-ish TLD? "rs" is a real TLD, so it navigates.
@@ -235,8 +276,20 @@ mod tests {
 
     #[test]
     fn ranking() {
-        let s = |u: &str, score| Suggestion { kind: SuggestionKind::History, title: String::new(), url: u.into(), score };
-        let r = rank(vec![s("https://a.com/", 1), s("http://a.com", 5), s("https://b.com", 3)], 10);
+        let s = |u: &str, score| Suggestion {
+            kind: SuggestionKind::History,
+            title: String::new(),
+            url: u.into(),
+            score,
+        };
+        let r = rank(
+            vec![
+                s("https://a.com/", 1),
+                s("http://a.com", 5),
+                s("https://b.com", 3),
+            ],
+            10,
+        );
         assert_eq!(r.len(), 2);
         assert_eq!(r[0].score, 5);
     }

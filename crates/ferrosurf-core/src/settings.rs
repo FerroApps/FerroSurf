@@ -243,9 +243,10 @@ impl AssistantSettings {
         }
         if !self.api_key_env.is_empty()
             && let Ok(v) = std::env::var(&self.api_key_env)
-                && !v.is_empty() {
-                    return Some(v);
-                }
+            && !v.is_empty()
+        {
+            return Some(v);
+        }
         None
     }
 }
@@ -336,7 +337,10 @@ impl Settings {
     }
 
     pub fn zoom_for_host(&self, host: &str) -> f32 {
-        self.site_zoom.get(host).copied().unwrap_or(self.default_zoom)
+        self.site_zoom
+            .get(host)
+            .copied()
+            .unwrap_or(self.default_zoom)
     }
 }
 

@@ -63,7 +63,7 @@ impl Action {
                     out.push(c.to_ascii_lowercase());
                 }
                 out
-            },
+            }
         }
     }
 
@@ -116,12 +116,45 @@ impl Action {
     pub fn all() -> Vec<Action> {
         use Action::*;
         vec![
-            NewTab, CloseTab, ReopenClosedTab, NextTab, PrevTab, NewWindow, NewGuestWindow,
-            FocusOmnibox, Reload, HardReload, Stop, Back, Forward, Home, Find, BookmarkPage,
-            ToggleBookmarksBar, ShowBookmarks, ShowHistory, ShowDownloads, ShowExtensions,
-            ShowSettings, ToggleAssistant, CommandPalette, ZoomIn, ZoomOut, ZoomReset, Fullscreen,
-            ToggleVerticalTabs, DuplicateTab, PinTab, ClearBrowsingData, DevTools, Screenshot,
-            SelectLastTab, ProfileManager, About, ViewSource, Quit,
+            NewTab,
+            CloseTab,
+            ReopenClosedTab,
+            NextTab,
+            PrevTab,
+            NewWindow,
+            NewGuestWindow,
+            FocusOmnibox,
+            Reload,
+            HardReload,
+            Stop,
+            Back,
+            Forward,
+            Home,
+            Find,
+            BookmarkPage,
+            ToggleBookmarksBar,
+            ShowBookmarks,
+            ShowHistory,
+            ShowDownloads,
+            ShowExtensions,
+            ShowSettings,
+            ToggleAssistant,
+            CommandPalette,
+            ZoomIn,
+            ZoomOut,
+            ZoomReset,
+            Fullscreen,
+            ToggleVerticalTabs,
+            DuplicateTab,
+            PinTab,
+            ClearBrowsingData,
+            DevTools,
+            Screenshot,
+            SelectLastTab,
+            ProfileManager,
+            About,
+            ViewSource,
+            Quit,
         ]
     }
 }
@@ -139,7 +172,13 @@ pub struct Accelerator {
 
 impl Accelerator {
     pub fn parse(s: &str) -> Option<Self> {
-        let mut acc = Accelerator { ctrl: false, shift: false, alt: false, logo: false, key: String::new() };
+        let mut acc = Accelerator {
+            ctrl: false,
+            shift: false,
+            alt: false,
+            logo: false,
+            key: String::new(),
+        };
         // Allow "Ctrl++" (plus key).
         let s = s.trim();
         let (mods, key) = if let Some(stripped) = s.strip_suffix("++") {
@@ -220,7 +259,7 @@ impl Accelerator {
                     } else {
                         return None;
                     }
-                },
+                }
             },
             _ => return None,
         };
@@ -237,10 +276,15 @@ impl Accelerator {
 
     /// Matching that tolerates shift for symbols that need shift on some layouts ("+").
     fn matches(&self, other: &Accelerator) -> bool {
-        if self.key != other.key || self.ctrl != other.ctrl || self.alt != other.alt || self.logo != other.logo {
+        if self.key != other.key
+            || self.ctrl != other.ctrl
+            || self.alt != other.alt
+            || self.logo != other.logo
+        {
             return false;
         }
-        self.shift == other.shift || (!self.key.chars().all(|c| c.is_alphanumeric()) && self.key.len() == 1)
+        self.shift == other.shift
+            || (!self.key.chars().all(|c| c.is_alphanumeric()) && self.key.len() == 1)
     }
 }
 
@@ -315,7 +359,10 @@ impl Keymap {
     pub fn new(overrides: &BTreeMap<String, String>) -> Self {
         let mut bindings = Vec::new();
         let mut overridden = std::collections::HashSet::new();
-        for action in Action::all().into_iter().chain((1..=8).map(Action::SelectTab)) {
+        for action in Action::all()
+            .into_iter()
+            .chain((1..=8).map(Action::SelectTab))
+        {
             if let Some(spec) = overrides.get(&action.id()) {
                 overridden.insert(action);
                 for s in spec.split(',') {
@@ -336,11 +383,17 @@ impl Keymap {
     }
 
     pub fn lookup(&self, acc: &Accelerator) -> Option<Action> {
-        self.bindings.iter().find(|(a, _)| a.matches(acc)).map(|(_, act)| *act)
+        self.bindings
+            .iter()
+            .find(|(a, _)| a.matches(acc))
+            .map(|(_, act)| *act)
     }
 
     pub fn shortcut_for(&self, action: Action) -> Option<String> {
-        self.bindings.iter().find(|(_, a)| *a == action).map(|(acc, _)| acc.display())
+        self.bindings
+            .iter()
+            .find(|(_, a)| *a == action)
+            .map(|(acc, _)| acc.display())
     }
 }
 
@@ -353,7 +406,13 @@ mod tests {
         let km = Keymap::new(&BTreeMap::new());
         let a = Accelerator::parse("Ctrl+Shift+T").unwrap();
         assert_eq!(km.lookup(&a), Some(Action::ReopenClosedTab));
-        let plus = Accelerator { ctrl: true, shift: true, alt: false, logo: false, key: "+".into() };
+        let plus = Accelerator {
+            ctrl: true,
+            shift: true,
+            alt: false,
+            logo: false,
+            key: "+".into(),
+        };
         assert_eq!(km.lookup(&plus), Some(Action::ZoomIn));
         assert_eq!(Accelerator::parse("Ctrl++").unwrap().key, "+");
         assert_eq!(km.shortcut_for(Action::NewTab).unwrap(), "Ctrl+T");
@@ -366,6 +425,9 @@ mod tests {
         o.insert("new_tab".to_string(), "Ctrl+Alt+N".to_string());
         let km = Keymap::new(&o);
         assert_eq!(km.lookup(&Accelerator::parse("Ctrl+T").unwrap()), None);
-        assert_eq!(km.lookup(&Accelerator::parse("Ctrl+Alt+N").unwrap()), Some(Action::NewTab));
+        assert_eq!(
+            km.lookup(&Accelerator::parse("Ctrl+Alt+N").unwrap()),
+            Some(Action::NewTab)
+        );
     }
 }

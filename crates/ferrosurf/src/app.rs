@@ -8,8 +8,8 @@ use ferrosurf_core::session::{SessionState, TabState, WindowState};
 use ferrosurf_core::{Profile, ProfileManager};
 use ferrosurf_extensions::{Decision as BlockDecision, RequestInfo, ResourceType};
 use servo::{
-    EmbedderControl, EventLoopWaker, LoadStatus, Opts, Preferences, RenderingContext, Servo, ServoBuilder,
-    UserContentManager, UserScript, WebResourceResponse,
+    EmbedderControl, EventLoopWaker, LoadStatus, Opts, Preferences, RenderingContext, Servo,
+    ServoBuilder, UserContentManager, UserScript, WebResourceResponse,
 };
 use url::Url;
 use winit::application::ApplicationHandler;
@@ -19,14 +19,14 @@ use winit::window::WindowId;
 
 use crate::Cli;
 use crate::actions::Keymap;
-use crate::tab::TabId;
-use ferrosurf_mcp::{BrowserCommand, CommandReply};
 use crate::delegate::{Delegate, EngineEvent};
 use crate::internal_pages::{PageContext, SharedPageContext};
 use crate::mcp_host::McpHost;
 use crate::profile_data::ProfileData;
+use crate::tab::TabId;
 use crate::ui::SharedUi;
 use crate::window::{AppCmd, BrowserWindow, Disposition, Env};
+use ferrosurf_mcp::{BrowserCommand, CommandReply};
 
 #[derive(Debug, Clone, Copy)]
 pub enum AppEvent {
@@ -47,7 +47,12 @@ impl EventLoopWaker for Waker {
 
 pub fn run(cli: Cli) -> anyhow::Result<()> {
     let event_loop = EventLoop::<AppEvent>::with_user_event().build()?;
-    let mut app = App { cli, proxy: event_loop.create_proxy(), state: None, failed: None };
+    let mut app = App {
+        cli,
+        proxy: event_loop.create_proxy(),
+        state: None,
+        failed: None,
+    };
     event_loop.run_app(&mut app)?;
     if let Some(e) = app.failed {
         return Err(e);
@@ -82,7 +87,6 @@ struct Running {
     last_maintenance: Instant,
     screenshot: Option<ScreenshotJob>,
     quitting: bool,
-    wake: Arc<dyn Fn() + Send + Sync>,
     pending_app_cmds: Vec<AppCmd>,
 }
 
@@ -121,7 +125,9 @@ pub fn pid_alive(pid: u32) -> bool {
 /// If another FerroSurf process already runs this profile, send it our URLs via its MCP
 /// endpoint and return true.
 pub fn forward_to_running_instance(cli: &Cli) -> bool {
-    let Ok(profiles) = ProfileManager::open_default() else { return false };
+    let Ok(profiles) = ProfileManager::open_default() else {
+        return false;
+    };
     let profile = match &cli.profile {
         Some(p) => match profiles.get(p) {
             Some(p) => p.clone(),
@@ -130,20 +136,39 @@ pub fn forward_to_running_instance(cli: &Cli) -> bool {
         None => profiles.default_profile().clone(),
     };
     let path = profiles.paths(&profile).mcp_token();
-    let Ok(ep) = ferrosurf_mcp::EndpointFile::read(&path) else { return false };
+    let Ok(ep) = ferrosurf_mcp::EndpointFile::read(&path) else {
+        return false;
+    };
     if !pid_alive(ep.pid) {
         return false;
     }
-    let Ok(rt) = tokio::runtime::Builder::new_current_thread().enable_all().build() else { return false };
+    let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    else {
+        return false;
+    };
     rt.block_on(async {
         let mut headers = std::collections::BTreeMap::new();
         headers.insert("Authorization".to_string(), format!("Bearer {}", ep.token));
-        let cfg = ferrosurf_mcp::ClientTransportConfig::Http { url: ep.url.clone(), headers };
-        let Ok(client) = tokio::time::timeout(Duration::from_secs(3), ferrosurf_mcp::McpClient::connect(cfg)).await else {
+        let cfg = ferrosurf_mcp::ClientTransportConfig::Http {
+            url: ep.url.clone(),
+            headers,
+        };
+        let Ok(client) = tokio::time::timeout(
+            Duration::from_secs(3),
+            ferrosurf_mcp::McpClient::connect(cfg),
+        )
+        .await
+        else {
             return false;
         };
         let Ok(client) = client else { return false };
-        let urls = if cli.urls.is_empty() { vec![String::new()] } else { cli.urls.clone() };
+        let urls = if cli.urls.is_empty() {
+            vec![String::new()]
+        } else {
+            cli.urls.clone()
+        };
         for u in urls {
             let args = serde_json::json!({"url": u, "background": false});
             if client.call_tool("browser_open_tab", args).await.is_err() {
@@ -176,13 +201,34 @@ impl App {
             let _ = proxy.send_event(AppEvent::Wake);
         });
         let mut profile_data = ProfileData::load(profiles, profile, wake.clone())?;
+        for dir in &self.cli.load_extension {
+            let already = profile_data
+                .extensions
+                .list()
+                .iter()
+                .any(|e| e.root.canonicalize().ok() == dir.canonicalize().ok());
+            if already {
+                let _ = profile_data.extensions.reload();
+            } else {
+                match profile_data.extensions.install_unpacked(dir) {
+                    Ok(id) => log::info!("Loaded unpacked extension {id} from {}", dir.display()),
+                    Err(e) => log::error!("Could not load extension {}: {e:#}", dir.display()),
+                }
+            }
+        }
+        profile_data.rebuild_blocker();
 
         // First window (needs a GL context before Servo starts rendering).
         let size = self.cli.window_size.as_deref().and_then(|s| {
             let (w, h) = s.split_once('x')?;
             Some((w.parse().ok()?, h.parse().ok()?))
         });
-        let first_window = BrowserWindow::new(event_loop, &profile_data, size, profile_data.profile.ephemeral)?;
+        let first_window = BrowserWindow::new(
+            event_loop,
+            &profile_data,
+            size,
+            profile_data.profile.ephemeral,
+        )?;
 
         // Servo, configured per profile.
         let mut opts = Opts::default();
@@ -194,9 +240,11 @@ impl App {
         }
         if profile_data.settings.enable_devtools {
             prefs.devtools_server_enabled = true;
-            prefs.devtools_server_listen_address = format!("127.0.0.1:{}", profile_data.settings.devtools_port);
+            prefs.devtools_server_listen_address =
+                format!("127.0.0.1:{}", profile_data.settings.devtools_port);
         }
-        let page_ctx: SharedPageContext = Arc::new(parking_lot::RwLock::new(PageContext::default()));
+        let page_ctx: SharedPageContext =
+            Arc::new(parking_lot::RwLock::new(PageContext::default()));
         let servo = ServoBuilder::default()
             .opts(opts)
             .preferences(prefs)
@@ -240,14 +288,15 @@ impl App {
                 started: Instant::now(),
             }),
             quitting: false,
-            wake: wake.clone(),
             pending_app_cmds: Vec::new(),
         };
         running.shared.wake = Some(wake);
         running.shared.mcp_url = running.mcp.url();
         running.sync_extensions();
         running.refresh_page_context();
-        running.mcp.connect_clients(&running.runtime, &running.profile);
+        running
+            .mcp
+            .connect_clients(&running.runtime, &running.profile);
 
         // Initial tabs: command line URLs, restored session or a new tab.
         let mut urls: Vec<Url> = Vec::new();
@@ -261,8 +310,13 @@ impl App {
         let restore = !self.cli.no_restore
             && self.cli.screenshot.is_none()
             && !running.profile.profile.ephemeral
-            && running.profile.settings.startup == ferrosurf_core::settings::StartupBehavior::RestoreSession;
-        let session = if restore { SessionState::load(&running.profile.paths.session()) } else { None };
+            && running.profile.settings.startup
+                == ferrosurf_core::settings::StartupBehavior::RestoreSession;
+        let session = if restore {
+            SessionState::load(&running.profile.paths.session())
+        } else {
+            None
+        };
         running.with_window(0, |w, env| {
             let mut restored = false;
             if let Some(session) = &session {
@@ -275,7 +329,7 @@ impl App {
                 let start = match env.profile.settings.startup {
                     ferrosurf_core::settings::StartupBehavior::Homepage => {
                         Url::parse(&env.profile.settings.homepage).ok()
-                    },
+                    }
                     _ => None,
                 };
                 w.open_tab(env, start, true, None);
@@ -287,7 +341,12 @@ impl App {
         // Extra windows from the session.
         if let Some(session) = &session {
             for ws in session.windows.iter().skip(1) {
-                if let Ok(w) = BrowserWindow::new(event_loop, &running.profile, Some((ws.width, ws.height)), false) {
+                if let Ok(w) = BrowserWindow::new(
+                    event_loop,
+                    &running.profile,
+                    Some((ws.width, ws.height)),
+                    false,
+                ) {
                     running.windows.push(w);
                     let idx = running.windows.len() - 1;
                     running.with_window(idx, |w, env| restore_window_tabs(w, env, ws));
@@ -303,7 +362,9 @@ impl App {
 
 fn restore_window_tabs(w: &mut BrowserWindow, env: &mut Env, ws: &WindowState) {
     for (i, ts) in ws.tabs.iter().enumerate() {
-        let Ok(url) = Url::parse(&ts.url) else { continue };
+        let Ok(url) = Url::parse(&ts.url) else {
+            continue;
+        };
         if i == ws.active.min(ws.tabs.len().saturating_sub(1)) {
             let id = w.open_tab(env, Some(url), true, None);
             if let Some(idx) = w.tab_index(id) {
@@ -330,7 +391,11 @@ fn restore_window_tabs(w: &mut BrowserWindow, env: &mut Env, ws: &WindowState) {
 
 impl Running {
     /// Run `f` with a window and an [`Env`] borrowing the rest of the app.
-    fn with_window<R>(&mut self, idx: usize, f: impl FnOnce(&mut BrowserWindow, &mut Env) -> R) -> Option<R> {
+    fn with_window<R>(
+        &mut self,
+        idx: usize,
+        f: impl FnOnce(&mut BrowserWindow, &mut Env) -> R,
+    ) -> Option<R> {
         let mut app_cmds = Vec::new();
         let r = {
             let window = self.windows.get_mut(idx)?;
@@ -340,7 +405,6 @@ impl Running {
                 ucm: &self.ucm,
                 profile: &mut self.profile,
                 keymap: &self.keymap,
-                page_ctx: &self.page_ctx,
                 shared: &mut self.shared,
                 app_cmds: &mut app_cmds,
             };
@@ -355,7 +419,9 @@ impl Running {
     }
 
     fn focused_index(&self) -> usize {
-        self.focused.and_then(|id| self.window_index(id)).unwrap_or(0)
+        self.focused
+            .and_then(|id| self.window_index(id))
+            .unwrap_or(0)
     }
 
     fn find_webview(&self, webview: &servo::WebView) -> Option<(usize, usize)> {
@@ -386,7 +452,16 @@ impl Running {
             .top_sites(8)
             .unwrap_or_default()
             .into_iter()
-            .map(|e| (if e.title.is_empty() { ferrosurf_core::util::pretty_url(&e.url) } else { e.title }, e.url))
+            .map(|e| {
+                (
+                    if e.title.is_empty() {
+                        ferrosurf_core::util::pretty_url(&e.url)
+                    } else {
+                        e.title
+                    },
+                    e.url,
+                )
+            })
             .collect();
         let bookmarks = self
             .profile
@@ -407,7 +482,11 @@ impl Running {
         ctx.search_url = engine.url.clone();
         ctx.top_sites = top_sites;
         ctx.bookmarks = bookmarks;
-        ctx.profile_name = if self.profile.profile.ephemeral { String::new() } else { self.profile.profile.name.clone() };
+        ctx.profile_name = if self.profile.profile.ephemeral {
+            String::new()
+        } else {
+            self.profile.profile.name.clone()
+        };
         ctx.data_dir = self.profile.paths.root.display().to_string();
         ctx.mcp_url = self.mcp.url();
         ctx.extensions = self
@@ -463,7 +542,14 @@ impl Running {
                                 title: t.title.clone(),
                                 pinned: t.pinned,
                                 zoom: t.zoom,
-                                history: t.back_forward.iter().rev().take(25).rev().map(|u| u.to_string()).collect(),
+                                history: t
+                                    .back_forward
+                                    .iter()
+                                    .rev()
+                                    .take(25)
+                                    .rev()
+                                    .map(|u| u.to_string())
+                                    .collect(),
                                 history_index: t.history_index,
                                 ..Default::default()
                             })
@@ -480,7 +566,12 @@ impl Running {
             })
             .filter(|w| !w.tabs.is_empty())
             .collect();
-        SessionState { version: 1, windows, saved_ms: ferrosurf_core::now_ms(), clean_exit }
+        SessionState {
+            version: 1,
+            windows,
+            saved_ms: ferrosurf_core::now_ms(),
+            clean_exit,
+        }
     }
 
     fn save_session(&mut self, clean_exit: bool) {
@@ -521,7 +612,7 @@ impl Running {
                         w.window.request_redraw();
                     }
                 }
-            },
+            }
             EngineEvent::UrlChanged(wv, url) => {
                 if let Some((wi, ti)) = self.find_webview(&wv) {
                     let tab = &mut self.windows[wi].tabs[ti];
@@ -541,7 +632,7 @@ impl Running {
                     self.windows[wi].needs_redraw = true;
                     self.windows[wi].window.request_redraw();
                 }
-            },
+            }
             EngineEvent::TitleChanged(wv, title) => {
                 if let Some((wi, ti)) = self.find_webview(&wv) {
                     let tab = &mut self.windows[wi].tabs[ti];
@@ -557,13 +648,13 @@ impl Running {
                     }
                     self.windows[wi].window.request_redraw();
                 }
-            },
+            }
             EngineEvent::StatusText(wv, text) => {
                 if let Some((wi, ti)) = self.find_webview(&wv) {
                     self.windows[wi].tabs[ti].status_text = text;
                     self.windows[wi].window.request_redraw();
                 }
-            },
+            }
             EngineEvent::LoadStatus(wv, status) => {
                 if let Some((wi, ti)) = self.find_webview(&wv) {
                     let tab = &mut self.windows[wi].tabs[ti];
@@ -577,7 +668,10 @@ impl Running {
                     tab.can_go_forward = wv.can_go_forward();
                     if status == LoadStatus::Complete {
                         tab.load_progress_start = None;
-                        if let (Some(u), Some(t)) = (wv.url(), wv.page_title().filter(|t| t != "Error loading page")) {
+                        if let (Some(u), Some(t)) = (
+                            wv.url(),
+                            wv.page_title().filter(|t| t != "Error loading page"),
+                        ) {
                             tab.title = t.clone();
                             let _ = self.profile.history.update_title(u.as_str(), &t);
                         }
@@ -591,7 +685,7 @@ impl Running {
                     }
                     self.windows[wi].window.request_redraw();
                 }
-            },
+            }
             EngineEvent::Cursor(wv, cursor) => {
                 if let Some((wi, ti)) = self.find_webview(&wv) {
                     let w = &self.windows[wi];
@@ -600,23 +694,25 @@ impl Running {
                             Some(icon) => {
                                 w.window.set_cursor_visible(true);
                                 w.window.set_cursor(icon);
-                            },
+                            }
                             None => w.window.set_cursor_visible(false),
                         }
                     }
                 }
-            },
+            }
             EngineEvent::Favicon(wv) => {
                 if let Some((wi, ti)) = self.find_webview(&wv) {
                     let tex = wv.favicon().and_then(|img| favicon_image(&img)).map(|ci| {
-                        self.windows[wi]
-                            .egui_ctx
-                            .load_texture(format!("favicon-{}", self.windows[wi].tabs[ti].id), ci, egui::TextureOptions::LINEAR)
+                        self.windows[wi].egui_ctx.load_texture(
+                            format!("favicon-{}", self.windows[wi].tabs[ti].id),
+                            ci,
+                            egui::TextureOptions::LINEAR,
+                        )
                     });
                     self.windows[wi].tabs[ti].favicon = tex;
                     self.windows[wi].window.request_redraw();
                 }
-            },
+            }
             EngineEvent::History(wv, entries, current) => {
                 if let Some((wi, ti)) = self.find_webview(&wv) {
                     let tab = &mut self.windows[wi].tabs[ti];
@@ -626,19 +722,19 @@ impl Running {
                     tab.history_index = current;
                     self.windows[wi].window.request_redraw();
                 }
-            },
+            }
             EngineEvent::Closed(wv) => {
                 if let Some((wi, ti)) = self.find_webview(&wv) {
                     self.with_window(wi, |w, env| w.close_tab(env, ti));
                 }
-            },
+            }
             EngineEvent::Crashed(wv, reason) => {
                 if let Some((wi, ti)) = self.find_webview(&wv) {
                     log::error!("WebView crashed: {reason}");
                     self.windows[wi].tabs[ti].crashed = Some(reason);
                     self.windows[wi].window.request_redraw();
                 }
-            },
+            }
             EngineEvent::Fullscreen(wv, fs) => {
                 if let Some((wi, _)) = self.find_webview(&wv) {
                     let w = &mut self.windows[wi];
@@ -646,7 +742,7 @@ impl Running {
                     w.window
                         .set_fullscreen(fs.then_some(winit::window::Fullscreen::Borderless(None)));
                 }
-            },
+            }
             EngineEvent::Navigation(wv, request) => self.handle_navigation(wv, request),
             EngineEvent::Unload(_, req) => req.allow(),
             EngineEvent::CreateNew(parent, request) => {
@@ -661,8 +757,10 @@ impl Running {
                     .user_content_manager(self.ucm.clone())
                     .hidpi_scale_factor(euclid::Scale::new(self.windows[wi].scale()))
                     .build();
-                self.with_window(wi, |w, env| w.adopt_webview(env, webview, Some(opener), true));
-            },
+                self.with_window(wi, |w, env| {
+                    w.adopt_webview(env, webview, Some(opener), true)
+                });
+            }
             EngineEvent::Permission(wv, request) => {
                 if let Some((wi, ti)) = self.find_webview(&wv) {
                     let origin = self.windows[wi].tabs[ti]
@@ -676,24 +774,29 @@ impl Running {
                         ferrosurf_core::permissions::Decision::Deny => request.deny(),
                         ferrosurf_core::permissions::Decision::Ask => {
                             let tab_id = self.windows[wi].tabs[ti].id;
-                            self.windows[wi].chrome.permission_prompts.push(crate::ui::PermissionPrompt {
-                                tab: tab_id,
-                                origin,
-                                kind,
-                                request: Some(request),
-                            });
+                            self.windows[wi].chrome.permission_prompts.push(
+                                crate::ui::PermissionPrompt {
+                                    tab: tab_id,
+                                    origin,
+                                    kind,
+                                    request: Some(request),
+                                },
+                            );
                             self.windows[wi].window.request_redraw();
-                        },
+                        }
                     }
                 }
-            },
+            }
             EngineEvent::Authentication(wv, request) => {
                 if let Some((wi, ti)) = self.find_webview(&wv) {
                     let tab = self.windows[wi].tabs[ti].id;
-                    self.windows[wi].chrome.auth_prompts.push(crate::ui::AuthPrompt::new(tab, request));
+                    self.windows[wi]
+                        .chrome
+                        .auth_prompts
+                        .push(crate::ui::AuthPrompt::new(tab, request));
                     self.windows[wi].window.request_redraw();
                 }
-            },
+            }
             EngineEvent::ShowControl(wv, control) => {
                 if let Some((wi, ti)) = self.find_webview(&wv) {
                     let tab = self.windows[wi].tabs[ti].id;
@@ -717,34 +820,34 @@ impl Running {
                                 picker.select(&paths);
                                 picker.submit();
                             }
-                        },
-                        EmbedderControl::InputMethod(_) => {},
+                        }
+                        EmbedderControl::InputMethod(_) => {}
                         other => {
                             self.windows[wi].controls.push((tab, other));
                             self.windows[wi].window.request_redraw();
-                        },
+                        }
                     }
                 }
-            },
+            }
             EngineEvent::HideControl(wv, id) => {
                 if let Some((wi, _)) = self.find_webview(&wv) {
                     self.windows[wi].controls.retain(|(_, c)| c.id() != id);
                     self.windows[wi].window.request_redraw();
                 }
-            },
+            }
             EngineEvent::WebResource(wv, load) => self.handle_web_resource(wv, load),
             EngineEvent::Notification(_, n) => {
                 self.shared.toast(&format!("🔔 {} — {}", n.title, n.body));
                 self.request_redraw_all();
-            },
+            }
             EngineEvent::Console(_, level, msg) => {
                 log::debug!(target: "console", "[{level:?}] {msg}");
-            },
-            EngineEvent::ResizeTo(_) => {},
+            }
+            EngineEvent::ResizeTo(_) => {}
             EngineEvent::DevtoolsStarted(port, token) => {
                 log::info!("DevTools server on port {port} (token {token})");
                 self.shared.devtools = Some((port, token));
-            },
+            }
             EngineEvent::DevtoolsConnection(req) => req.allow(),
             EngineEvent::Error(e) => log::error!("Servo error: {e}"),
         }
@@ -754,7 +857,10 @@ impl Running {
         let url = request.url.clone();
         let loc = self.find_webview(&wv);
         // External protocols.
-        if matches!(url.scheme(), "mailto" | "tel" | "sms" | "magnet" | "irc" | "steam" | "zoommtg" | "slack" | "spotify") {
+        if matches!(
+            url.scheme(),
+            "mailto" | "tel" | "sms" | "magnet" | "irc" | "steam" | "zoommtg" | "slack" | "spotify"
+        ) {
             request.deny();
             open_external(url.as_str());
             return;
@@ -782,7 +888,9 @@ impl Running {
             request.deny();
             if let Some((wi, _)) = loc {
                 let referrer = wv.url();
-                self.with_window(wi, |_w, env| crate::window::start_download(env, &url, referrer));
+                self.with_window(wi, |_w, env| {
+                    crate::window::start_download(env, &url, referrer)
+                });
             }
             self.request_redraw_all();
             return;
@@ -805,7 +913,11 @@ impl Running {
             return; // dropping `load` lets it proceed
         }
         let resource_type = resource_type(&format!("{:?}", req.destination), req.is_for_main_frame);
-        let initiator: Option<Url> = req.referrer_url.clone().map(|u| u.into_url()).or_else(|| wv.as_ref().and_then(|w| w.url()));
+        let initiator: Option<Url> = req
+            .referrer_url
+            .clone()
+            .map(|u| u.into_url())
+            .or_else(|| wv.as_ref().and_then(|w| w.url()));
         let decision = self.profile.blocker.read().check(&RequestInfo {
             url: &url,
             initiator: initiator.as_ref(),
@@ -818,8 +930,11 @@ impl Running {
                     self.windows[wi].tabs[ti].blocked_requests += 1;
                 }
                 self.shared.blocked_total += 1;
-                load.intercept(WebResourceResponse::new(url).status_code(http::StatusCode::FORBIDDEN)).cancel();
-            },
+                load.intercept(
+                    WebResourceResponse::new(url).status_code(http::StatusCode::FORBIDDEN),
+                )
+                .cancel();
+            }
             BlockDecision::UpgradeScheme if url.scheme() == "http" => {
                 let mut u = url.clone();
                 let _ = u.set_scheme("https");
@@ -833,7 +948,7 @@ impl Running {
                         h
                     });
                 load.intercept(resp).finish();
-            },
+            }
             BlockDecision::Redirect(target) => {
                 let resp = WebResourceResponse::new(url)
                     .status_code(http::StatusCode::TEMPORARY_REDIRECT)
@@ -845,8 +960,8 @@ impl Running {
                         h
                     });
                 load.intercept(resp).finish();
-            },
-            _ => {},
+            }
+            _ => {}
         }
     }
 
@@ -861,7 +976,12 @@ impl Running {
 
     fn handle_app_cmd(&mut self, event_loop: &ActiveEventLoop, cmd: AppCmd) {
         match cmd {
-            AppCmd::NewWindow { urls } => match BrowserWindow::new(event_loop, &self.profile, None, self.profile.profile.ephemeral) {
+            AppCmd::NewWindow { urls } => match BrowserWindow::new(
+                event_loop,
+                &self.profile,
+                None,
+                self.profile.profile.ephemeral,
+            ) {
                 Ok(w) => {
                     self.windows.push(w);
                     let idx = self.windows.len() - 1;
@@ -873,7 +993,7 @@ impl Running {
                             w.open_tab(env, Some(u), true, None);
                         }
                     });
-                },
+                }
                 Err(e) => log::error!("Could not open window: {e}"),
             },
             AppCmd::NewGuestWindow => spawn_self(&["--guest"]),
@@ -887,7 +1007,7 @@ impl Running {
                         w.destroy();
                     }
                 }
-            },
+            }
             AppCmd::Quit => self.quit(event_loop),
             AppCmd::ExtensionsChanged => self.sync_extensions(),
             AppCmd::SettingsChanged => {
@@ -900,8 +1020,12 @@ impl Running {
                     crate::ui::theme::apply(&w.egui_ctx, &self.profile, w.window.theme());
                 }
                 self.request_redraw_all();
-            },
-            AppCmd::ClearBrowsingData { history, cookies, cache } => {
+            }
+            AppCmd::ClearBrowsingData {
+                history,
+                cookies,
+                cache,
+            } => {
                 if history {
                     let _ = self.profile.history.clear();
                     self.profile.closed_tabs = Default::default();
@@ -917,21 +1041,49 @@ impl Running {
                 }
                 self.refresh_page_context();
                 self.shared.toast("Datos de navegación borrados");
-            },
+            }
             AppCmd::StartAssistant { text } => {
                 let idx = self.focused_index();
                 let page = self.windows.get(idx).and_then(|w| w.active_tab()).map(|t| {
-                    format!("Pestaña activa: «{}» — {}", t.display_title(), t.url_string())
+                    format!(
+                        "Pestaña activa: «{}» — {}",
+                        t.display_title(),
+                        t.url_string()
+                    )
                 });
-                self.mcp.start_assistant(&self.runtime, &self.profile, &mut self.shared, text, page);
-            },
+                self.mcp.start_assistant(
+                    &self.runtime,
+                    &self.profile,
+                    &mut self.shared,
+                    text,
+                    page,
+                );
+            }
             AppCmd::StopAssistant => self.mcp.stop_assistant(&mut self.shared),
+            AppCmd::ResolveMcpApproval { allow, always } => {
+                if !self.shared.mcp_approvals.is_empty() {
+                    let p = self.shared.mcp_approvals.remove(0);
+                    if always {
+                        self.shared.mcp_trusted_session = true;
+                    }
+                    if allow {
+                        if let Some((reply, res)) = self.exec_mcp_command(p.cmd, p.reply) {
+                            let _ = reply.send(res);
+                        }
+                    } else {
+                        let _ = p
+                            .reply
+                            .send(Err("El usuario ha denegado esta acción".into()));
+                    }
+                }
+                self.request_redraw_all();
+            }
             AppCmd::ReconnectMcpClients => self.mcp.connect_clients(&self.runtime, &self.profile),
             AppCmd::RestartMcpServer => {
                 self.mcp.restart_server(&self.runtime, &mut self.profile);
                 self.shared.mcp_url = self.mcp.url();
                 self.refresh_page_context();
-            },
+            }
         }
     }
 
@@ -989,14 +1141,30 @@ impl Running {
                 let wi = self.focused_index();
                 let w = self.windows.get(wi)?;
                 (!w.tabs.is_empty()).then_some((wi, w.active))
-            },
+            }
         }
     }
 
     /// Execute commands coming from MCP agents (external or the built-in assistant).
     fn process_mcp_commands(&mut self) {
         self.mcp.expire_pending();
-        for (cmd, reply) in self.mcp.take_commands() {
+        for ((cmd, reply), external) in self.mcp.take_commands() {
+            if external
+                && self.profile.settings.mcp_server.confirm_actions
+                && !self.shared.mcp_trusted_session
+            {
+                if let Some(description) = crate::mcp_host::describe_mutation(&cmd) {
+                    self.shared
+                        .mcp_approvals
+                        .push(crate::mcp_host::PendingApproval {
+                            description,
+                            cmd,
+                            reply,
+                        });
+                    self.request_redraw_all();
+                    continue;
+                }
+            }
             let result = self.exec_mcp_command(cmd, reply);
             if let Some((reply, res)) = result {
                 let _ = reply.send(res);
@@ -1011,7 +1179,8 @@ impl Running {
         reply: tokio::sync::oneshot::Sender<CommandReply>,
     ) -> Option<(tokio::sync::oneshot::Sender<CommandReply>, CommandReply)> {
         use serde_json::json;
-        let no_tab = || Err::<serde_json::Value, String>("No hay ninguna pestaña con ese id".to_string());
+        let no_tab =
+            || Err::<serde_json::Value, String>("No hay ninguna pestaña con ese id".to_string());
         let res: CommandReply = match cmd {
             BrowserCommand::ListTabs => {
                 let focused = self.focused_index();
@@ -1034,11 +1203,15 @@ impl Running {
                     })
                     .collect();
                 Ok(json!({ "tabs": tabs }))
-            },
+            }
             BrowserCommand::OpenTab { url, background } => {
                 let wi = self.focused_index();
                 let r = self.with_window(wi, |w, env| {
-                    let target = if url.trim().is_empty() { None } else { crate::window::interpret_input(env, &url) };
+                    let target = if url.trim().is_empty() {
+                        None
+                    } else {
+                        crate::window::interpret_input(env, &url)
+                    };
                     let id = w.open_tab(env, target, !background, None);
                     w.window.focus_window();
                     id
@@ -1047,12 +1220,12 @@ impl Running {
                     Some(id) => Ok(json!({ "tab_id": id })),
                     None => Err("No hay ventanas abiertas".into()),
                 }
-            },
+            }
             BrowserCommand::CloseTab { tab_id } => match self.find_tab(Some(tab_id)) {
                 Some((wi, ti)) => {
                     self.with_window(wi, |w, env| w.close_tab(env, ti));
                     Ok(json!({ "closed": true }))
-                },
+                }
                 None => no_tab(),
             },
             BrowserCommand::ActivateTab { tab_id } => match self.find_tab(Some(tab_id)) {
@@ -1062,7 +1235,7 @@ impl Running {
                         w.window.focus_window();
                     });
                     Ok(json!({ "activated": true }))
-                },
+                }
                 None => no_tab(),
             },
             BrowserCommand::Navigate { tab_id, url } => match self.find_tab(tab_id) {
@@ -1079,17 +1252,21 @@ impl Running {
                         Some(target)
                     });
                     match r.flatten() {
-                        Some(u) => Ok(json!({ "url": u.as_str(), "tab_id": self.windows[wi].tabs[ti].id })),
+                        Some(u) => {
+                            Ok(json!({ "url": u.as_str(), "tab_id": self.windows[wi].tabs[ti].id }))
+                        }
                         None => Err("Dirección no válida".into()),
                     }
-                },
+                }
                 None => no_tab(),
             },
-            BrowserCommand::GoBack { tab_id } | BrowserCommand::GoForward { tab_id } | BrowserCommand::Reload { tab_id }
+            BrowserCommand::GoBack { tab_id }
+            | BrowserCommand::GoForward { tab_id }
+            | BrowserCommand::Reload { tab_id }
                 if self.find_tab(tab_id).is_none() =>
             {
                 no_tab()
-            },
+            }
             BrowserCommand::GoBack { tab_id } => {
                 let (wi, ti) = self.find_tab(tab_id)?;
                 let tab = &mut self.windows[wi].tabs[ti];
@@ -1098,10 +1275,10 @@ impl Running {
                         wv.go_back(1);
                         tab.load_status = LoadStatus::Started;
                         Ok(json!({ "ok": true }))
-                    },
+                    }
                     _ => Err("No se puede ir atrás".into()),
                 }
-            },
+            }
             BrowserCommand::GoForward { tab_id } => {
                 let (wi, ti) = self.find_tab(tab_id)?;
                 let tab = &mut self.windows[wi].tabs[ti];
@@ -1110,10 +1287,10 @@ impl Running {
                         wv.go_forward(1);
                         tab.load_status = LoadStatus::Started;
                         Ok(json!({ "ok": true }))
-                    },
+                    }
                     _ => Err("No se puede ir adelante".into()),
                 }
-            },
+            }
             BrowserCommand::Reload { tab_id } => {
                 let (wi, ti) = self.find_tab(tab_id)?;
                 let tab = &mut self.windows[wi].tabs[ti];
@@ -1122,7 +1299,7 @@ impl Running {
                     tab.load_status = LoadStatus::Started;
                 }
                 Ok(json!({ "ok": true }))
-            },
+            }
             BrowserCommand::WaitForLoad { tab_id, timeout_ms } => match self.find_tab(tab_id) {
                 Some((wi, ti)) => {
                     let tab = &self.windows[wi].tabs[ti];
@@ -1134,8 +1311,10 @@ impl Running {
                         });
                         return None;
                     }
-                    Ok(json!({ "loaded": true, "title": tab.display_title(), "url": tab.url_string() }))
-                },
+                    Ok(
+                        json!({ "loaded": true, "title": tab.display_title(), "url": tab.url_string() }),
+                    )
+                }
                 None => no_tab(),
             },
             BrowserCommand::EvaluateJs { tab_id, script } => match self.find_tab(tab_id) {
@@ -1151,10 +1330,10 @@ impl Running {
                                 let _ = reply.send(r);
                             });
                             return None;
-                        },
+                        }
                         None => Err("La pestaña no está cargada".into()),
                     }
-                },
+                }
                 None => no_tab(),
             },
             BrowserCommand::Screenshot { tab_id } => match self.find_tab(tab_id) {
@@ -1180,10 +1359,10 @@ impl Running {
                                 let _ = reply.send(r);
                             });
                             return None;
-                        },
+                        }
                         None => Err("La pestaña no está cargada".into()),
                     }
-                },
+                }
                 None => no_tab(),
             },
             BrowserCommand::SearchHistory { query, limit } => {
@@ -1193,7 +1372,9 @@ impl Running {
                         .visits("", None, limit.max(1))
                         .unwrap_or_default()
                         .into_iter()
-                        .map(|v| json!({ "url": v.url, "title": v.title, "visited_ms": v.visit_ms }))
+                        .map(
+                            |v| json!({ "url": v.url, "title": v.title, "visited_ms": v.visit_ms }),
+                        )
                         .collect()
                 } else {
                     self.profile
@@ -1205,10 +1386,16 @@ impl Running {
                         .collect()
                 };
                 Ok(json!({ "results": items }))
-            },
+            }
             BrowserCommand::SearchBookmarks { query, limit } => {
                 let items: Vec<_> = if query.trim().is_empty() {
-                    self.profile.bookmarks.all().into_iter().take(limit.max(1)).map(|b| json!({ "url": b.url, "title": b.title, "tags": b.tags })).collect()
+                    self.profile
+                        .bookmarks
+                        .all()
+                        .into_iter()
+                        .take(limit.max(1))
+                        .map(|b| json!({ "url": b.url, "title": b.title, "tags": b.tags }))
+                        .collect()
                 } else {
                     self.profile
                         .bookmarks
@@ -1218,23 +1405,31 @@ impl Running {
                         .collect()
                 };
                 Ok(json!({ "results": items }))
-            },
+            }
             BrowserCommand::AddBookmark { url, title } => {
                 let active = self.find_tab(None).map(|(wi, ti)| {
                     let t = &self.windows[wi].tabs[ti];
                     (t.url_string(), t.display_title())
                 });
-                let url = url.or_else(|| active.as_ref().map(|a| a.0.clone())).unwrap_or_default();
-                let title = title.or_else(|| active.map(|a| a.1)).unwrap_or_else(|| url.clone());
+                let url = url
+                    .or_else(|| active.as_ref().map(|a| a.0.clone()))
+                    .unwrap_or_default();
+                let title = title
+                    .or_else(|| active.map(|a| a.1))
+                    .unwrap_or_else(|| url.clone());
                 if url.is_empty() {
                     Err("No hay URL que guardar".into())
                 } else {
-                    match self.profile.bookmarks.add(ferrosurf_core::bookmarks::TOOLBAR_ID, &title, &url) {
+                    match self.profile.bookmarks.add(
+                        ferrosurf_core::bookmarks::TOOLBAR_ID,
+                        &title,
+                        &url,
+                    ) {
                         Ok(id) => Ok(json!({ "bookmark_id": id })),
                         Err(e) => Err(e.to_string()),
                     }
                 }
-            },
+            }
         };
         self.request_redraw_all();
         Some((reply, res))
@@ -1260,13 +1455,15 @@ impl Running {
                 ucm: &self.ucm,
                 profile: &mut self.profile,
                 keymap: &self.keymap,
-                page_ctx: &self.page_ctx,
                 shared: &mut self.shared,
                 app_cmds: &mut app_cmds,
             };
             w.redraw(&mut env);
             let size = w.window.inner_size();
-            let rect = servo::DeviceIntRect::from_size(servo::DeviceIntSize::new(size.width as i32, size.height as i32));
+            let rect = servo::DeviceIntRect::from_size(servo::DeviceIntSize::new(
+                size.width as i32,
+                size.height as i32,
+            ));
             match w.rendering_context.read_to_image(rect) {
                 Some(img) => match img.save(&path) {
                     Ok(()) => println!("Screenshot saved to {}", path.display()),
@@ -1295,17 +1492,25 @@ impl ApplicationHandler<AppEvent> for App {
         state.servo.spin_event_loop();
         state.process_engine_events(event_loop);
         state.process_mcp_commands();
-        if state.mcp.poll_assistant(&mut state.shared) || state.profile.downloads.active_count() > 0 {
+        if state.mcp.poll_assistant(&mut state.shared) || state.profile.downloads.active_count() > 0
+        {
             state.request_redraw_all();
         }
         state.process_app_cmds(event_loop);
     }
 
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, window_id: WindowId, event: WindowEvent) {
+    fn window_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        window_id: WindowId,
+        event: WindowEvent,
+    ) {
         let Some(state) = &mut self.state else { return };
         state.servo.spin_event_loop();
         state.process_engine_events(event_loop);
-        let Some(idx) = state.window_index(window_id) else { return };
+        let Some(idx) = state.window_index(window_id) else {
+            return;
+        };
         match &event {
             WindowEvent::CloseRequested => {
                 if state.windows.len() == 1 {
@@ -1315,15 +1520,15 @@ impl ApplicationHandler<AppEvent> for App {
                     w.destroy();
                 }
                 return;
-            },
+            }
             WindowEvent::Focused(true) => state.focused = Some(window_id),
             WindowEvent::RedrawRequested => {
                 state.with_window(idx, |w, env| w.redraw(env));
                 state.process_app_cmds(event_loop);
                 state.check_screenshot(event_loop);
                 return;
-            },
-            _ => {},
+            }
+            _ => {}
         }
         state.with_window(idx, |w, env| w.handle_window_event(env, &event));
         if let Some(w) = state.windows.get(idx) {
@@ -1370,22 +1575,35 @@ fn favicon_image(img: &servo::Image) -> Option<egui::ColorImage> {
     let data = img.data();
     let rgba: Vec<u8> = match img.format {
         servo::PixelFormat::RGBA8 => data.to_vec(),
-        servo::PixelFormat::BGRA8 => data.chunks_exact(4).flat_map(|p| [p[2], p[1], p[0], p[3]]).collect(),
-        servo::PixelFormat::RGB8 => data.chunks_exact(3).flat_map(|p| [p[0], p[1], p[2], 255]).collect(),
+        servo::PixelFormat::BGRA8 => data
+            .chunks_exact(4)
+            .flat_map(|p| [p[2], p[1], p[0], p[3]])
+            .collect(),
+        servo::PixelFormat::RGB8 => data
+            .chunks_exact(3)
+            .flat_map(|p| [p[0], p[1], p[2], 255])
+            .collect(),
         servo::PixelFormat::K8 => data.iter().flat_map(|k| [*k, *k, *k, 255]).collect(),
-        servo::PixelFormat::KA8 => data.chunks_exact(2).flat_map(|p| [p[0], p[0], p[0], p[1]]).collect(),
+        servo::PixelFormat::KA8 => data
+            .chunks_exact(2)
+            .flat_map(|p| [p[0], p[0], p[0], p[1]])
+            .collect(),
     };
     if rgba.len() < w * h * 4 || w == 0 || h == 0 {
         return None;
     }
-    Some(egui::ColorImage::from_rgba_unmultiplied([w, h], &rgba[..w * h * 4]))
+    Some(egui::ColorImage::from_rgba_unmultiplied(
+        [w, h],
+        &rgba[..w * h * 4],
+    ))
 }
 
 fn resource_type(destination: &str, main_frame: bool) -> ResourceType {
     match destination {
         "Document" if main_frame => ResourceType::MainFrame,
         "Document" | "Iframe" | "Frame" | "Embed" | "Object" => ResourceType::SubFrame,
-        "Script" | "Worker" | "SharedWorker" | "ServiceWorker" | "AudioWorklet" | "PaintWorklet" | "Json" => ResourceType::Script,
+        "Script" | "Worker" | "SharedWorker" | "ServiceWorker" | "AudioWorklet"
+        | "PaintWorklet" | "Json" => ResourceType::Script,
         "Style" => ResourceType::Stylesheet,
         "Image" => ResourceType::Image,
         "Font" => ResourceType::Font,
@@ -1399,9 +1617,44 @@ fn resource_type(destination: &str, main_frame: bool) -> ResourceType {
 /// URLs whose extension strongly suggests a file download.
 fn is_download_url(url: &Url) -> bool {
     const EXT: &[&str] = &[
-        "zip", "7z", "rar", "gz", "tgz", "bz2", "xz", "zst", "exe", "msi", "msix", "dmg", "pkg", "deb", "rpm",
-        "appimage", "flatpakref", "iso", "img", "apk", "jar", "torrent", "pdf", "docx", "xlsx", "pptx", "odt",
-        "ods", "odp", "epub", "mobi", "bin", "dll", "so", "crx", "xpi", "whl", "nupkg",
+        "zip",
+        "7z",
+        "rar",
+        "gz",
+        "tgz",
+        "bz2",
+        "xz",
+        "zst",
+        "exe",
+        "msi",
+        "msix",
+        "dmg",
+        "pkg",
+        "deb",
+        "rpm",
+        "appimage",
+        "flatpakref",
+        "iso",
+        "img",
+        "apk",
+        "jar",
+        "torrent",
+        "pdf",
+        "docx",
+        "xlsx",
+        "pptx",
+        "odt",
+        "ods",
+        "odp",
+        "epub",
+        "mobi",
+        "bin",
+        "dll",
+        "so",
+        "crx",
+        "xpi",
+        "whl",
+        "nupkg",
     ];
     if !matches!(url.scheme(), "http" | "https") {
         return false;
@@ -1416,7 +1669,9 @@ fn is_download_url(url: &Url) -> bool {
 
 pub fn open_external(target: &str) {
     #[cfg(windows)]
-    let r = std::process::Command::new("cmd").args(["/C", "start", "", target]).spawn();
+    let r = std::process::Command::new("cmd")
+        .args(["/C", "start", "", target])
+        .spawn();
     #[cfg(not(windows))]
     let r = std::process::Command::new("xdg-open").arg(target).spawn();
     if let Err(e) = r {
@@ -1430,7 +1685,7 @@ fn spawn_self(args: &[&str]) {
             if let Err(e) = std::process::Command::new(exe).args(args).spawn() {
                 log::error!("Could not start FerroSurf: {e}");
             }
-        },
+        }
         Err(e) => log::error!("current_exe: {e}"),
     }
 }

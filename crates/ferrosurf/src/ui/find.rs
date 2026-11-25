@@ -91,23 +91,48 @@ pub fn find_bar(ctx: &egui::Context, w: &mut BrowserWindow, cmds: &mut Vec<Cmd>)
                             w.chrome.find.focus = false;
                             resp.request_focus();
                         }
-                        let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                        let enter =
+                            resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                         let shift = ui.input(|i| i.modifiers.shift);
                         if resp.changed() {
                             w.chrome.find.last_sent = w.chrome.find.query.clone();
-                            cmds.push(Cmd::FindInPage { query: w.chrome.find.query.clone(), forward: true });
+                            cmds.push(Cmd::FindInPage {
+                                query: w.chrome.find.query.clone(),
+                                forward: true,
+                            });
                         }
                         if enter {
-                            cmds.push(Cmd::FindInPage { query: w.chrome.find.query.clone(), forward: !shift });
+                            cmds.push(Cmd::FindInPage {
+                                query: w.chrome.find.query.clone(),
+                                forward: !shift,
+                            });
                             resp.request_focus();
                         }
-                        ui.label(RichText::new(&w.chrome.find.result).small().color(pal.text_dim));
+                        ui.label(
+                            RichText::new(&w.chrome.find.result)
+                                .small()
+                                .color(pal.text_dim),
+                        );
                         ui.allocate_space(Vec2::new(4.0, 0.0));
-                        if ui.button(icon::CARET_UP).on_hover_text("Anterior (Shift+Enter)").clicked() {
-                            cmds.push(Cmd::FindInPage { query: w.chrome.find.query.clone(), forward: false });
+                        if ui
+                            .button(icon::CARET_UP)
+                            .on_hover_text("Anterior (Shift+Enter)")
+                            .clicked()
+                        {
+                            cmds.push(Cmd::FindInPage {
+                                query: w.chrome.find.query.clone(),
+                                forward: false,
+                            });
                         }
-                        if ui.button(icon::CARET_DOWN).on_hover_text("Siguiente (Enter)").clicked() {
-                            cmds.push(Cmd::FindInPage { query: w.chrome.find.query.clone(), forward: true });
+                        if ui
+                            .button(icon::CARET_DOWN)
+                            .on_hover_text("Siguiente (Enter)")
+                            .clicked()
+                        {
+                            cmds.push(Cmd::FindInPage {
+                                query: w.chrome.find.query.clone(),
+                                forward: true,
+                            });
                         }
                         if ui.button(icon::X).clicked() {
                             close = true;

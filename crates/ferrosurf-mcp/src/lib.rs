@@ -16,6 +16,6 @@ mod util;
 pub use browser::{BrowserBridge, BrowserCommand, CommandReply, ToolPolicy};
 pub use client::{ClientTransportConfig, McpClient, McpClientManager, ServerStatus};
 pub use server::{
-    run_stdio_bridge, spawn_http_server, Content, EndpointFile, HttpServerHandle, McpServer,
-    ToolDef, ToolHandler, ToolOutput,
+    Content, EndpointFile, HttpServerHandle, McpServer, ToolDef, ToolHandler, ToolOutput,
+    run_stdio_bridge, spawn_http_server,
 };

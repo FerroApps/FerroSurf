@@ -74,33 +74,54 @@ pub fn show_all(ctx: &egui::Context, w: &mut BrowserWindow, env: &mut Env, cmds:
             EmbedderControl::SimpleDialog(dialog) => {
                 let id = control_key;
                 let mut outcome: Option<bool> = None;
-                let origin = url::Url::parse(&tab_url).ok().and_then(|u| u.host_str().map(str::to_string)).unwrap_or_default();
-                egui::Modal::new(Id::new(("simple-dialog", id.clone()))).frame(modal_frame(&pal)).show(ctx, |ui| {
-                    ui.set_width(420.0);
-                    ui.label(RichText::new(format!("{}  {origin} dice", icon::GLOBE_SIMPLE)).strong());
-                    ui.add_space(8.0);
-                    egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
-                        ui.label(dialog.message());
+                let origin = url::Url::parse(&tab_url)
+                    .ok()
+                    .and_then(|u| u.host_str().map(str::to_string))
+                    .unwrap_or_default();
+                egui::Modal::new(Id::new(("simple-dialog", id.clone())))
+                    .frame(modal_frame(&pal))
+                    .show(ctx, |ui| {
+                        ui.set_width(420.0);
+                        ui.label(
+                            RichText::new(format!("{}  {origin} dice", icon::GLOBE_SIMPLE))
+                                .strong(),
+                        );
+                        ui.add_space(8.0);
+                        egui::ScrollArea::vertical()
+                            .max_height(300.0)
+                            .show(ui, |ui| {
+                                ui.label(dialog.message());
+                            });
+                        if let SimpleDialog::Prompt(p) = dialog {
+                            let value = w
+                                .chrome
+                                .dialogs
+                                .prompt_values
+                                .entry(id.clone())
+                                .or_insert_with(|| p.current_value().to_string());
+                            let r = ui.add(
+                                egui::TextEdit::singleline(value).desired_width(f32::INFINITY),
+                            );
+                            r.request_focus();
+                            p.set_current_value(value);
+                            if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                                outcome = Some(true);
+                            }
+                        }
+                        ui.add_space(12.0);
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if widgets::accent_button(ui, "Aceptar").clicked()
+                                || ui.input(|i| i.key_pressed(egui::Key::Enter))
+                            {
+                                outcome = Some(true);
+                            }
+                            if !matches!(dialog, SimpleDialog::Alert(_))
+                                && widgets::subtle_button(ui, "Cancelar").clicked()
+                            {
+                                outcome = Some(false);
+                            }
+                        });
                     });
-                    if let SimpleDialog::Prompt(p) = dialog {
-                        let value = w.chrome.dialogs.prompt_values.entry(id.clone()).or_insert_with(|| p.current_value().to_string());
-                        let r = ui.add(egui::TextEdit::singleline(value).desired_width(f32::INFINITY));
-                        r.request_focus();
-                        p.set_current_value(value);
-                        if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                            outcome = Some(true);
-                        }
-                    }
-                    ui.add_space(12.0);
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if widgets::accent_button(ui, "Aceptar").clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                            outcome = Some(true);
-                        }
-                        if !matches!(dialog, SimpleDialog::Alert(_)) && widgets::subtle_button(ui, "Cancelar").clicked() {
-                            outcome = Some(false);
-                        }
-                    });
-                });
                 if let Some(ok) = outcome {
                     if let (_, EmbedderControl::SimpleDialog(d)) = w.controls.remove(i) {
                         if ok { d.confirm() } else { d.dismiss() }
@@ -108,9 +129,10 @@ pub fn show_all(ctx: &egui::Context, w: &mut BrowserWindow, env: &mut Env, cmds:
                     w.chrome.dialogs.prompt_values.remove(&id);
                     consumed = true;
                 }
-            },
+            }
             EmbedderControl::ContextMenu(menu) => {
-                let pos = content.min + (Vec2::new(menu.position().min.x as f32, menu.position().min.y as f32) / ppp);
+                let pos = content.min
+                    + (Vec2::new(menu.position().min.x as f32, menu.position().min.y as f32) / ppp);
                 let info = menu.element_info().clone();
                 let items: Vec<ContextMenuItem> = menu.items().to_vec();
                 let mut choice: Option<ContextMenuAction> = None;
@@ -216,8 +238,14 @@ pub fn show_all(ctx: &egui::Context, w: &mut BrowserWindow, env: &mut Env, cmds:
                     });
                 w.chrome.overlay_rects.push(area.response.rect);
                 let clicked_outside = ctx.input(|i| i.pointer.any_pressed())
-                    && ctx.pointer_interact_pos().is_some_and(|p| !area.response.rect.contains(p));
-                if choice.is_some() || close || clicked_outside || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    && ctx
+                        .pointer_interact_pos()
+                        .is_some_and(|p| !area.response.rect.contains(p));
+                if choice.is_some()
+                    || close
+                    || clicked_outside
+                    || ctx.input(|i| i.key_pressed(egui::Key::Escape))
+                {
                     if let (_, EmbedderControl::ContextMenu(m)) = w.controls.remove(i) {
                         match choice {
                             Some(a) => m.select(a),
@@ -226,7 +254,7 @@ pub fn show_all(ctx: &egui::Context, w: &mut BrowserWindow, env: &mut Env, cmds:
                     }
                     consumed = true;
                 }
-            },
+            }
             EmbedderControl::SelectElement(select) => {
                 let r = select.position();
                 let pos = content.min + Vec2::new(r.min.x as f32, r.max.y as f32) / ppp;
@@ -242,31 +270,53 @@ pub fn show_all(ctx: &egui::Context, w: &mut BrowserWindow, env: &mut Env, cmds:
                     .show(ctx, |ui| {
                         egui::Frame::menu(ui.style()).show(ui, |ui| {
                             ui.set_min_width(width);
-                            egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
-                                let mut row = |ui: &mut egui::Ui, o: &servo::SelectElementOption, indent: bool| {
-                                    let is_sel = selected.contains(&o.id);
-                                    let label = if indent { format!("    {}", o.label) } else { o.label.clone() };
-                                    if ui.add_enabled(!o.is_disabled, egui::Button::selectable(is_sel, label)).clicked() {
-                                        picked = Some(o.id);
-                                    }
-                                };
-                                for opt in &options {
-                                    match opt {
-                                        SelectElementOptionOrOptgroup::Option(o) => row(ui, o, false),
-                                        SelectElementOptionOrOptgroup::Optgroup { label, options } => {
-                                            ui.label(RichText::new(label).strong().small());
-                                            for o in options {
-                                                row(ui, o, true);
+                            egui::ScrollArea::vertical()
+                                .max_height(360.0)
+                                .show(ui, |ui| {
+                                    let mut row =
+                                        |ui: &mut egui::Ui,
+                                         o: &servo::SelectElementOption,
+                                         indent: bool| {
+                                            let is_sel = selected.contains(&o.id);
+                                            let label = if indent {
+                                                format!("    {}", o.label)
+                                            } else {
+                                                o.label.clone()
+                                            };
+                                            if ui
+                                                .add_enabled(
+                                                    !o.is_disabled,
+                                                    egui::Button::selectable(is_sel, label),
+                                                )
+                                                .clicked()
+                                            {
+                                                picked = Some(o.id);
                                             }
-                                        },
+                                        };
+                                    for opt in &options {
+                                        match opt {
+                                            SelectElementOptionOrOptgroup::Option(o) => {
+                                                row(ui, o, false)
+                                            }
+                                            SelectElementOptionOrOptgroup::Optgroup {
+                                                label,
+                                                options,
+                                            } => {
+                                                ui.label(RichText::new(label).strong().small());
+                                                for o in options {
+                                                    row(ui, o, true);
+                                                }
+                                            }
+                                        }
                                     }
-                                }
-                            });
+                                });
                         });
                     });
                 w.chrome.overlay_rects.push(area.response.rect);
                 let clicked_outside = ctx.input(|i| i.pointer.any_pressed())
-                    && ctx.pointer_interact_pos().is_some_and(|p| !area.response.rect.contains(p));
+                    && ctx
+                        .pointer_interact_pos()
+                        .is_some_and(|p| !area.response.rect.contains(p));
                 if let Some(id) = picked {
                     if multiple {
                         let mut sel = selected.clone();
@@ -284,17 +334,21 @@ pub fn show_all(ctx: &egui::Context, w: &mut BrowserWindow, env: &mut Env, cmds:
                         consumed = true;
                     }
                 }
-                if !consumed && (clicked_outside || ctx.input(|i| i.key_pressed(egui::Key::Escape))) {
+                if !consumed && (clicked_outside || ctx.input(|i| i.key_pressed(egui::Key::Escape)))
+                {
                     if let (_, EmbedderControl::SelectElement(s)) = w.controls.remove(i) {
                         s.submit();
                     }
                     consumed = true;
                 }
-            },
+            }
             EmbedderControl::ColorPicker(picker) => {
                 let r = picker.position();
                 let pos = content.min + Vec2::new(r.min.x as f32, r.max.y as f32) / ppp;
-                let current = picker.current_color().map(|c| Color32::from_rgb(c.red, c.green, c.blue)).unwrap_or(Color32::BLACK);
+                let current = picker
+                    .current_color()
+                    .map(|c| Color32::from_rgb(c.red, c.green, c.blue))
+                    .unwrap_or(Color32::BLACK);
                 let mut color = current;
                 let mut done = false;
                 let area = egui::Area::new(Id::new("color-picker"))
@@ -303,7 +357,11 @@ pub fn show_all(ctx: &egui::Context, w: &mut BrowserWindow, env: &mut Env, cmds:
                     .constrain(true)
                     .show(ctx, |ui| {
                         egui::Frame::menu(ui.style()).show(ui, |ui| {
-                            egui::color_picker::color_picker_color32(ui, &mut color, egui::color_picker::Alpha::Opaque);
+                            egui::color_picker::color_picker_color32(
+                                ui,
+                                &mut color,
+                                egui::color_picker::Alpha::Opaque,
+                            );
                             ui.horizontal(|ui| {
                                 if widgets::accent_button(ui, "Aceptar").clicked() {
                                     done = true;
@@ -313,7 +371,11 @@ pub fn show_all(ctx: &egui::Context, w: &mut BrowserWindow, env: &mut Env, cmds:
                     });
                 w.chrome.overlay_rects.push(area.response.rect);
                 if color != current {
-                    picker.select(Some(servo::RgbColor { red: color.r(), green: color.g(), blue: color.b() }));
+                    picker.select(Some(servo::RgbColor {
+                        red: color.r(),
+                        green: color.g(),
+                        blue: color.b(),
+                    }));
                 }
                 if done || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
                     if let (_, EmbedderControl::ColorPicker(p)) = w.controls.remove(i) {
@@ -321,8 +383,8 @@ pub fn show_all(ctx: &egui::Context, w: &mut BrowserWindow, env: &mut Env, cmds:
                     }
                     consumed = true;
                 }
-            },
-            _ => {},
+            }
+            _ => {}
         }
         if !consumed {
             i += 1;
@@ -330,31 +392,55 @@ pub fn show_all(ctx: &egui::Context, w: &mut BrowserWindow, env: &mut Env, cmds:
     }
 
     // HTTP authentication.
-    if let Some(idx) = w.chrome.auth_prompts.iter().position(|p| Some(p.tab) == active) {
+    if let Some(idx) = w
+        .chrome
+        .auth_prompts
+        .iter()
+        .position(|p| Some(p.tab) == active)
+    {
         let mut submit: Option<bool> = None;
         let prompt = &mut w.chrome.auth_prompts[idx];
-        let host = prompt.request.as_ref().map(|r| r.url().host_str().unwrap_or("").to_string()).unwrap_or_default();
+        let host = prompt
+            .request
+            .as_ref()
+            .map(|r| r.url().host_str().unwrap_or("").to_string())
+            .unwrap_or_default();
         let proxy = prompt.request.as_ref().is_some_and(|r| r.for_proxy());
-        egui::Modal::new(Id::new("auth-dialog")).frame(modal_frame(&pal)).show(ctx, |ui| {
-            ui.set_width(380.0);
-            ui.label(RichText::new(format!("{}  Iniciar sesión", icon::KEY)).heading());
-            ui.label(if proxy { format!("El proxy {host} requiere usuario y contraseña") } else { format!("{host} requiere usuario y contraseña") });
-            ui.add_space(8.0);
-            ui.add(egui::TextEdit::singleline(&mut prompt.user).hint_text("Usuario").desired_width(f32::INFINITY));
-            let pw = ui.add(egui::TextEdit::singleline(&mut prompt.password).password(true).hint_text("Contraseña").desired_width(f32::INFINITY));
-            if pw.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                submit = Some(true);
-            }
-            ui.add_space(10.0);
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if widgets::accent_button(ui, "Iniciar sesión").clicked() {
+        egui::Modal::new(Id::new("auth-dialog"))
+            .frame(modal_frame(&pal))
+            .show(ctx, |ui| {
+                ui.set_width(380.0);
+                ui.label(RichText::new(format!("{}  Iniciar sesión", icon::KEY)).heading());
+                ui.label(if proxy {
+                    format!("El proxy {host} requiere usuario y contraseña")
+                } else {
+                    format!("{host} requiere usuario y contraseña")
+                });
+                ui.add_space(8.0);
+                ui.add(
+                    egui::TextEdit::singleline(&mut prompt.user)
+                        .hint_text("Usuario")
+                        .desired_width(f32::INFINITY),
+                );
+                let pw = ui.add(
+                    egui::TextEdit::singleline(&mut prompt.password)
+                        .password(true)
+                        .hint_text("Contraseña")
+                        .desired_width(f32::INFINITY),
+                );
+                if pw.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     submit = Some(true);
                 }
-                if widgets::subtle_button(ui, "Cancelar").clicked() {
-                    submit = Some(false);
-                }
+                ui.add_space(10.0);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if widgets::accent_button(ui, "Iniciar sesión").clicked() {
+                        submit = Some(true);
+                    }
+                    if widgets::subtle_button(ui, "Cancelar").clicked() {
+                        submit = Some(false);
+                    }
+                });
             });
-        });
         if let Some(ok) = submit {
             let mut prompt = w.chrome.auth_prompts.remove(idx);
             if let Some(req) = prompt.request.take() {
@@ -381,14 +467,24 @@ fn spanish_label(action: &ContextMenuAction) -> Option<&'static str> {
     })
 }
 
-
 const ASK_SELECTION_JS: &str = "String(window.getSelection())";
 
 /// Permission prompts anchored to the top-left of the content area.
-pub fn doorhangers(ui: &mut egui::Ui, content: Rect, w: &mut BrowserWindow, env: &mut Env, cmds: &mut Vec<Cmd>) {
+pub fn doorhangers(
+    ui: &mut egui::Ui,
+    content: Rect,
+    w: &mut BrowserWindow,
+    env: &mut Env,
+    cmds: &mut Vec<Cmd>,
+) {
     let pal = Palette::get(ui.ctx());
     let active = w.active_tab().map(|t| t.id);
-    let Some(idx) = w.chrome.permission_prompts.iter().position(|p| Some(p.tab) == active) else {
+    let Some(idx) = w
+        .chrome
+        .permission_prompts
+        .iter()
+        .position(|p| Some(p.tab) == active)
+    else {
         return;
     };
     let (glyph, what) = permission_label(&w.chrome.permission_prompts[idx].kind);
@@ -398,29 +494,35 @@ pub fn doorhangers(ui: &mut egui::Ui, content: Rect, w: &mut BrowserWindow, env:
         .order(egui::Order::Foreground)
         .fixed_pos(content.min + Vec2::new(12.0, 8.0))
         .show(ui.ctx(), |ui| {
-            modal_frame(&pal).shadow(ui.ctx().global_style().visuals.popup_shadow).show(ui, |ui| {
-                ui.set_width(340.0);
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(glyph).size(22.0).color(pal.accent));
-                    ui.vertical(|ui| {
-                        ui.label(RichText::new(origin.trim_start_matches("https://")).strong());
-                        ui.label(format!("quiere {what}"));
+            modal_frame(&pal)
+                .shadow(ui.ctx().global_style().visuals.popup_shadow)
+                .show(ui, |ui| {
+                    ui.set_width(340.0);
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(glyph).size(22.0).color(pal.accent));
+                        ui.vertical(|ui| {
+                            ui.label(RichText::new(origin.trim_start_matches("https://")).strong());
+                            ui.label(format!("quiere {what}"));
+                        });
+                    });
+                    let mut remember =
+                        ui.data_mut(|d| *d.get_temp_mut_or(Id::new("perm-remember"), true));
+                    if ui
+                        .checkbox(&mut remember, "Recordar esta decisión")
+                        .changed()
+                    {
+                        ui.data_mut(|d| d.insert_temp(Id::new("perm-remember"), remember));
+                    }
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        if widgets::accent_button(ui, "Permitir").clicked() {
+                            decision = Some((Decision::Allow, remember));
+                        }
+                        if widgets::subtle_button(ui, "Bloquear").clicked() {
+                            decision = Some((Decision::Deny, remember));
+                        }
                     });
                 });
-                let mut remember = ui.data_mut(|d| *d.get_temp_mut_or(Id::new("perm-remember"), true));
-                if ui.checkbox(&mut remember, "Recordar esta decisión").changed() {
-                    ui.data_mut(|d| d.insert_temp(Id::new("perm-remember"), remember));
-                }
-                ui.add_space(6.0);
-                ui.horizontal(|ui| {
-                    if widgets::accent_button(ui, "Permitir").clicked() {
-                        decision = Some((Decision::Allow, remember));
-                    }
-                    if widgets::subtle_button(ui, "Bloquear").clicked() {
-                        decision = Some((Decision::Deny, remember));
-                    }
-                });
-            });
         });
     w.chrome.overlay_rects.push(area.response.rect);
     if let Some((d, remember)) = decision {
@@ -441,7 +543,9 @@ pub fn doorhangers(ui: &mut egui::Ui, content: Rect, w: &mut BrowserWindow, env:
 }
 
 fn bookmark_editor(ctx: &egui::Context, w: &mut BrowserWindow, env: &mut Env) {
-    let Some(ed) = &mut w.chrome.bookmark_editor else { return };
+    let Some(ed) = &mut w.chrome.bookmark_editor else {
+        return;
+    };
     let pal = Palette::get(ctx);
     let field = w.chrome.omnibox.field_rect.0;
     let mut close = false;
@@ -451,29 +555,42 @@ fn bookmark_editor(ctx: &egui::Context, w: &mut BrowserWindow, env: &mut Env) {
         .order(egui::Order::Foreground)
         .fixed_pos(Pos2::new(field.right() - 340.0, field.bottom() + 6.0))
         .show(ctx, |ui| {
-            modal_frame(&pal).shadow(ctx.global_style().visuals.popup_shadow).show(ui, |ui| {
-                ui.set_width(310.0);
-                ui.label(RichText::new(format!("{}  Marcador añadido", icon::STAR)).strong().color(pal.accent));
-                ui.add_space(6.0);
-                ui.label(RichText::new("Nombre").small());
-                ui.add(egui::TextEdit::singleline(&mut ed.title).desired_width(f32::INFINITY));
-                ui.label(RichText::new("Carpeta").small());
-                let current = folders.iter().find(|(id, _)| *id == ed.folder).map(|f| f.1.clone()).unwrap_or_default();
-                egui::ComboBox::from_id_salt("bm-folder").width(290.0).selected_text(current).show_ui(ui, |ui| {
-                    for (id, path) in &folders {
-                        ui.selectable_value(&mut ed.folder, *id, path);
-                    }
+            modal_frame(&pal)
+                .shadow(ctx.global_style().visuals.popup_shadow)
+                .show(ui, |ui| {
+                    ui.set_width(310.0);
+                    ui.label(
+                        RichText::new(format!("{}  Marcador añadido", icon::STAR))
+                            .strong()
+                            .color(pal.accent),
+                    );
+                    ui.add_space(6.0);
+                    ui.label(RichText::new("Nombre").small());
+                    ui.add(egui::TextEdit::singleline(&mut ed.title).desired_width(f32::INFINITY));
+                    ui.label(RichText::new("Carpeta").small());
+                    let current = folders
+                        .iter()
+                        .find(|(id, _)| *id == ed.folder)
+                        .map(|f| f.1.clone())
+                        .unwrap_or_default();
+                    egui::ComboBox::from_id_salt("bm-folder")
+                        .width(290.0)
+                        .selected_text(current)
+                        .show_ui(ui, |ui| {
+                            for (id, path) in &folders {
+                                ui.selectable_value(&mut ed.folder, *id, path);
+                            }
+                        });
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        if widgets::accent_button(ui, "Listo").clicked() {
+                            close = true;
+                        }
+                        if widgets::subtle_button(ui, "Eliminar").clicked() {
+                            remove = true;
+                        }
+                    });
                 });
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    if widgets::accent_button(ui, "Listo").clicked() {
-                        close = true;
-                    }
-                    if widgets::subtle_button(ui, "Eliminar").clicked() {
-                        remove = true;
-                    }
-                });
-            });
         });
     w.chrome.overlay_rects.push(area.response.rect);
     if remove {

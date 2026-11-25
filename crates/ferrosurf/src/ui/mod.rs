@@ -38,6 +38,10 @@ pub struct SharedUi {
     pub assistant: assistant::AssistantState,
     pub mcp_clients: Vec<ferrosurf_mcp::ServerStatus>,
     pub wake: Option<WakeFn>,
+    /// External MCP actions waiting for confirmation (Ajustes → MCP → Confirmar acciones).
+    pub mcp_approvals: Vec<crate::mcp_host::PendingApproval>,
+    /// The user chose "allow for this session".
+    pub mcp_trusted_session: bool,
 }
 
 impl SharedUi {
@@ -89,7 +93,12 @@ pub struct AuthPrompt {
 
 impl AuthPrompt {
     pub fn new(tab: TabId, request: servo::AuthenticationRequest) -> Self {
-        Self { tab, request: Some(request), user: String::new(), password: String::new() }
+        Self {
+            tab,
+            request: Some(request),
+            user: String::new(),
+            password: String::new(),
+        }
     }
 }
 
@@ -99,7 +108,6 @@ pub struct BookmarkEditor {
     pub title: String,
     pub url: String,
     pub folder: BookmarkId,
-    pub opened: Instant,
 }
 
 impl BookmarkEditor {
@@ -109,7 +117,6 @@ impl BookmarkEditor {
             title: b.title.clone(),
             url: b.url.clone(),
             folder: ferrosurf_core::bookmarks::TOOLBAR_ID,
-            opened: Instant::now(),
         }
     }
 }
@@ -222,7 +229,13 @@ impl Chrome {
 }
 
 /// Draw the whole chrome for one frame.
-pub fn draw(root: &mut egui::Ui, w: &mut BrowserWindow, env: &mut Env, offscreen: &Rc<OffscreenRenderingContext>, cmds: &mut Vec<Cmd>) {
+pub fn draw(
+    root: &mut egui::Ui,
+    w: &mut BrowserWindow,
+    env: &mut Env,
+    offscreen: &Rc<OffscreenRenderingContext>,
+    cmds: &mut Vec<Cmd>,
+) {
     let ctx = root.ctx().clone();
     let pal = Palette::get(&ctx);
     w.chrome.overlay_rects.clear();
@@ -240,17 +253,35 @@ pub fn draw(root: &mut egui::Ui, w: &mut BrowserWindow, env: &mut Env, offscreen
     if !fullscreen_content {
         if !vertical {
             egui::Panel::top("tabstrip")
-                .frame(egui::Frame::new().fill(pal.bg).inner_margin(egui::Margin { left: 6, right: 6, top: 6, bottom: 0 }))
+                .frame(egui::Frame::new().fill(pal.bg).inner_margin(egui::Margin {
+                    left: 6,
+                    right: 6,
+                    top: 6,
+                    bottom: 0,
+                }))
                 .show_separator_line(false)
                 .show(root, |ui| tabs::tab_strip(ui, w, env, cmds));
         }
         egui::Panel::top("toolbar")
-            .frame(egui::Frame::new().fill(pal.toolbar).inner_margin(egui::Margin::symmetric(8, 5)))
+            .frame(
+                egui::Frame::new()
+                    .fill(pal.toolbar)
+                    .inner_margin(egui::Margin::symmetric(8, 5)),
+            )
             .show_separator_line(false)
             .show(root, |ui| toolbar::toolbar(ui, w, env, cmds));
         if app.show_bookmarks_bar {
             egui::Panel::top("bookmarks_bar")
-                .frame(egui::Frame::new().fill(pal.toolbar).inner_margin(egui::Margin { left: 8, right: 8, top: 0, bottom: 4 }))
+                .frame(
+                    egui::Frame::new()
+                        .fill(pal.toolbar)
+                        .inner_margin(egui::Margin {
+                            left: 8,
+                            right: 8,
+                            top: 0,
+                            bottom: 4,
+                        }),
+                )
                 .show_separator_line(false)
                 .show(root, |ui| toolbar::bookmarks_bar(ui, w, env, cmds));
         }
@@ -265,7 +296,11 @@ pub fn draw(root: &mut egui::Ui, w: &mut BrowserWindow, env: &mut Env, offscreen
                 .resizable(true)
                 .default_size(230.0)
                 .size_range(56.0..=420.0)
-                .frame(egui::Frame::new().fill(pal.bg).inner_margin(egui::Margin::same(6)))
+                .frame(
+                    egui::Frame::new()
+                        .fill(pal.bg)
+                        .inner_margin(egui::Margin::same(6)),
+                )
                 .show(root, |ui| tabs::vertical_tabs(ui, w, env, cmds));
         }
         if w.chrome.assistant_open {
@@ -273,7 +308,11 @@ pub fn draw(root: &mut egui::Ui, w: &mut BrowserWindow, env: &mut Env, offscreen
                 .resizable(true)
                 .default_size(380.0)
                 .size_range(280.0..=720.0)
-                .frame(egui::Frame::new().fill(pal.toolbar).inner_margin(egui::Margin::same(10)))
+                .frame(
+                    egui::Frame::new()
+                        .fill(pal.toolbar)
+                        .inner_margin(egui::Margin::same(10)),
+                )
                 .show(root, |ui| assistant::panel(ui, w, env, cmds));
         }
         if let Some(tab) = w.chrome.library {
@@ -281,7 +320,11 @@ pub fn draw(root: &mut egui::Ui, w: &mut BrowserWindow, env: &mut Env, offscreen
                 .resizable(true)
                 .default_size(400.0)
                 .size_range(300.0..=760.0)
-                .frame(egui::Frame::new().fill(pal.toolbar).inner_margin(egui::Margin::same(10)))
+                .frame(
+                    egui::Frame::new()
+                        .fill(pal.toolbar)
+                        .inner_margin(egui::Margin::same(10)),
+                )
                 .show(root, |ui| library::panel(ui, tab, w, env, cmds));
         }
     }
@@ -303,6 +346,7 @@ pub fn draw(root: &mut egui::Ui, w: &mut BrowserWindow, env: &mut Env, offscreen
         settings::window(&ctx, w, env, cmds);
     }
     palette::show(&ctx, w, env, cmds);
+    mcp_approval(&ctx, env, cmds, &pal);
     toasts(&ctx, env, &pal);
 }
 
@@ -315,7 +359,15 @@ fn content_area(
     cmds: &mut Vec<Cmd>,
 ) {
     let pal = Palette::get(ui.ctx());
-    let tab_state = w.active_tab().map(|t| (t.webview.is_some(), t.crashed.clone(), t.status_text.clone(), t.zoom, t.id));
+    let tab_state = w.active_tab().map(|t| {
+        (
+            t.webview.is_some(),
+            t.crashed.clone(),
+            t.status_text.clone(),
+            t.zoom,
+            t.id,
+        )
+    });
     let Some((live, crashed, status, zoom, tab_id)) = tab_state else {
         ui.painter().rect_filled(rect, 0.0, pal.bg);
         return;
@@ -323,7 +375,8 @@ fn content_area(
 
     if let (true, None) = (live, &crashed) {
         if let Some(render) = offscreen.render_to_parent_callback() {
-            let render: Arc<dyn Fn(&glow::Context, euclid::default::Rect<i32>) + Send + Sync> = Arc::from(render);
+            let render: Arc<dyn Fn(&glow::Context, euclid::default::Rect<i32>) + Send + Sync> =
+                Arc::from(render);
             let cb = egui_glow::CallbackFn::new(move |info, painter| {
                 let vp = info.viewport_in_pixels();
                 let target = euclid::default::Rect::new(
@@ -332,7 +385,10 @@ fn content_area(
                 );
                 render(painter.gl(), target);
             });
-            ui.painter().add(egui::PaintCallback { rect, callback: Arc::new(cb) });
+            ui.painter().add(egui::PaintCallback {
+                rect,
+                callback: Arc::new(cb),
+            });
         } else {
             ui.painter().rect_filled(rect, 0.0, Color32::WHITE);
         }
@@ -341,11 +397,17 @@ fn content_area(
         ui.scope_builder(egui::UiBuilder::new().max_rect(rect.shrink(40.0)), |ui| {
             ui.vertical_centered(|ui| {
                 ui.add_space(rect.height() * 0.25);
-                ui.label(egui::RichText::new(icon::SMILEY_SAD).size(56.0).color(pal.text_dim));
+                ui.label(
+                    egui::RichText::new(icon::SMILEY_SAD)
+                        .size(56.0)
+                        .color(pal.text_dim),
+                );
                 ui.heading("Esta pestaña ha dejado de funcionar");
                 ui.label(egui::RichText::new(reason).color(pal.text_dim).small());
                 ui.add_space(12.0);
-                if widgets::accent_button(ui, &format!("{}  Recargar", icon::ARROW_CLOCKWISE)).clicked() {
+                if widgets::accent_button(ui, &format!("{}  Recargar", icon::ARROW_CLOCKWISE))
+                    .clicked()
+                {
                     cmds.push(Cmd::ReloadTab(tab_id));
                 }
             });
@@ -363,18 +425,47 @@ fn content_area(
                 pal.text,
             );
             let size = galley.size() + egui::vec2(16.0, 8.0);
-            let r = Rect::from_min_size(Pos2::new(rect.left() + 6.0, rect.bottom() - size.y - 6.0), size.min(egui::vec2(rect.width() * 0.6, 40.0)));
-            ui.painter().rect(r, 6.0, pal.toolbar, egui::Stroke::new(1.0, pal.border), egui::StrokeKind::Inside);
-            ui.painter().with_clip_rect(r).galley(r.min + egui::vec2(8.0, 4.0), galley, pal.text);
+            let r = Rect::from_min_size(
+                Pos2::new(rect.left() + 6.0, rect.bottom() - size.y - 6.0),
+                size.min(egui::vec2(rect.width() * 0.6, 40.0)),
+            );
+            ui.painter().rect(
+                r,
+                6.0,
+                pal.toolbar,
+                egui::Stroke::new(1.0, pal.border),
+                egui::StrokeKind::Inside,
+            );
+            ui.painter()
+                .with_clip_rect(r)
+                .galley(r.min + egui::vec2(8.0, 4.0), galley, pal.text);
         }
     }
 
     // Zoom indicator.
-    if w.chrome.zoom_bubble_until.is_some_and(|t| t > Instant::now()) {
+    if w.chrome
+        .zoom_bubble_until
+        .is_some_and(|t| t > Instant::now())
+    {
         let text = format!("{}  {:.0}%", icon::MAGNIFYING_GLASS_PLUS, zoom * 100.0);
-        let r = Rect::from_center_size(Pos2::new(rect.right() - 70.0, rect.top() + 26.0), egui::vec2(110.0, 32.0));
-        ui.painter().rect(r, 8.0, pal.toolbar, egui::Stroke::new(1.0, pal.border), egui::StrokeKind::Inside);
-        ui.painter().text(r.center(), egui::Align2::CENTER_CENTER, text, egui::FontId::proportional(14.0), pal.text);
+        let r = Rect::from_center_size(
+            Pos2::new(rect.right() - 70.0, rect.top() + 26.0),
+            egui::vec2(110.0, 32.0),
+        );
+        ui.painter().rect(
+            r,
+            8.0,
+            pal.toolbar,
+            egui::Stroke::new(1.0, pal.border),
+            egui::StrokeKind::Inside,
+        );
+        ui.painter().text(
+            r.center(),
+            egui::Align2::CENTER_CENTER,
+            text,
+            egui::FontId::proportional(14.0),
+            pal.text,
+        );
         ui.ctx().request_repaint_after(Duration::from_millis(200));
         w.chrome.overlay_rects.push(r);
     }
@@ -382,8 +473,56 @@ fn content_area(
     dialogs::doorhangers(ui, rect, w, env, cmds);
 }
 
+fn mcp_approval(ctx: &egui::Context, env: &mut Env, cmds: &mut Vec<Cmd>, pal: &Palette) {
+    let Some(first) = env.shared.mcp_approvals.first() else {
+        return;
+    };
+    let desc = first.description.clone();
+    let mut decision: Option<(bool, bool)> = None;
+    egui::Modal::new(Id::new("mcp-approval"))
+        .frame(
+            egui::Frame::new()
+                .fill(pal.toolbar)
+                .stroke(egui::Stroke::new(1.0, pal.border))
+                .corner_radius(14)
+                .inner_margin(egui::Margin::same(18)),
+        )
+        .show(ctx, |ui| {
+            ui.set_width(440.0);
+            ui.label(
+                egui::RichText::new(format!(
+                    "{}  Un agente MCP quiere actuar",
+                    icon::PLUGS_CONNECTED
+                ))
+                .heading(),
+            );
+            ui.add_space(6.0);
+            ui.label(format!("Solicitud: {desc}"));
+            ui.add_space(12.0);
+            ui.horizontal(|ui| {
+                if widgets::accent_button(ui, "Permitir").clicked() {
+                    decision = Some((true, false));
+                }
+                if widgets::subtle_button(ui, "Permitir durante esta sesión").clicked() {
+                    decision = Some((true, true));
+                }
+                if widgets::subtle_button(ui, "Denegar").clicked() {
+                    decision = Some((false, false));
+                }
+            });
+        });
+    if let Some((allow, always)) = decision {
+        cmds.push(Cmd::App(crate::window::AppCmd::ResolveMcpApproval {
+            allow,
+            always,
+        }));
+    }
+}
+
 fn toasts(ctx: &egui::Context, env: &mut Env, pal: &Palette) {
-    env.shared.toasts.retain(|(_, t)| t.elapsed() < Duration::from_secs(4));
+    env.shared
+        .toasts
+        .retain(|(_, t)| t.elapsed() < Duration::from_secs(4));
     if env.shared.toasts.is_empty() {
         return;
     }
@@ -396,12 +535,18 @@ fn toasts(ctx: &egui::Context, env: &mut Env, pal: &Palette) {
             ui.set_max_width(screen.width() * 0.6);
             for (msg, _) in &env.shared.toasts {
                 egui::Frame::new()
-                    .fill(if pal.dark { Color32::from_rgb(0x2b, 0x2f, 0x38) } else { Color32::from_rgb(0x26, 0x29, 0x30) })
+                    .fill(if pal.dark {
+                        Color32::from_rgb(0x2b, 0x2f, 0x38)
+                    } else {
+                        Color32::from_rgb(0x26, 0x29, 0x30)
+                    })
                     .corner_radius(10)
                     .inner_margin(egui::Margin::symmetric(14, 9))
                     .shadow(ctx.global_style().visuals.popup_shadow)
                     .show(ui, |ui| {
-                        ui.label(egui::RichText::new(msg).color(Color32::from_rgb(0xf2, 0xf3, 0xf5)));
+                        ui.label(
+                            egui::RichText::new(msg).color(Color32::from_rgb(0xf2, 0xf3, 0xf5)),
+                        );
                     });
                 ui.add_space(6.0);
             }

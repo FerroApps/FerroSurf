@@ -83,7 +83,9 @@ impl Tab {
             return self.title.trim().to_string();
         }
         match &self.url {
-            Some(u) if u.as_str() == "ferro://newtab" || u.as_str() == "ferro://newtab/" => "Nueva pestaña".into(),
+            Some(u) if u.as_str() == "ferro://newtab" || u.as_str() == "ferro://newtab/" => {
+                "Nueva pestaña".into()
+            }
             Some(u) => ferrosurf_core::util::pretty_url(u.as_str()),
             None => "Nueva pestaña".into(),
         }
@@ -111,6 +113,8 @@ impl Tab {
     }
 
     pub fn host(&self) -> Option<String> {
-        self.url.as_ref().and_then(|u| u.host_str().map(str::to_string))
+        self.url
+            .as_ref()
+            .and_then(|u| u.host_str().map(str::to_string))
     }
 }

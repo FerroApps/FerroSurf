@@ -10,8 +10,8 @@ use ferrosurf_core::util::html_escape;
 use parking_lot::RwLock;
 use servo::ServoUrl;
 use servo::protocol_handler::{
-    DoneChannel, FetchContext, HttpStatus, ProtocolHandler, ProtocolRegistry, Request, ResourceFetchTiming,
-    Response, ResponseBody,
+    DoneChannel, FetchContext, HttpStatus, ProtocolHandler, ProtocolRegistry, Request,
+    ResourceFetchTiming, Response, ResponseBody,
 };
 
 const NEWTAB: &str = include_str!("../resources/pages/newtab.html");
@@ -41,7 +41,10 @@ pub type SharedPageContext = Arc<RwLock<PageContext>>;
 
 /// Escape a value placed inside a double-quoted JS string literal.
 fn js_str(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"").replace('<', "\\u003c").replace('\n', "\\n")
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('<', "\\u003c")
+        .replace('\n', "\\n")
 }
 
 fn json_list(items: &[(String, String)]) -> String {
@@ -49,7 +52,9 @@ fn json_list(items: &[(String, String)]) -> String {
         .iter()
         .map(|(t, u)| serde_json::json!({"title": t, "url": u}))
         .collect();
-    serde_json::to_string(&v).unwrap_or_else(|_| "[]".into()).replace("</", "<\\/")
+    serde_json::to_string(&v)
+        .unwrap_or_else(|_| "[]".into())
+        .replace("</", "<\\/")
 }
 
 fn common(page: &str, ctx: &PageContext) -> String {
@@ -70,12 +75,19 @@ pub fn render_about(ctx: &PageContext) -> String {
     common(ABOUT, ctx)
         .replace("{{VERSION}}", env!("CARGO_PKG_VERSION"))
         .replace("{{ENGINE}}", "Servo 0.8")
-        .replace("{{PLATFORM}}", &format!("{} {}", std::env::consts::OS, std::env::consts::ARCH))
+        .replace(
+            "{{PLATFORM}}",
+            &format!("{} {}", std::env::consts::OS, std::env::consts::ARCH),
+        )
         .replace("{{PROFILE}}", &html_escape(&ctx.profile_name))
         .replace("{{DATA_DIR}}", &html_escape(&ctx.data_dir))
         .replace(
             "{{MCP_URL}}",
-            &html_escape(if ctx.mcp_url.is_empty() { "(desactivado)" } else { &ctx.mcp_url }),
+            &html_escape(if ctx.mcp_url.is_empty() {
+                "(desactivado)"
+            } else {
+                &ctx.mcp_url
+            }),
         )
 }
 
@@ -125,17 +137,32 @@ impl ProtocolHandler for FerroHandler {
                 if let Some(path) = &ctx.newtab_override {
                     match std::fs::read(path) {
                         Ok(b) => (b, "text/html; charset=utf-8", 200),
-                        Err(_) => (render_newtab(&ctx).into_bytes(), "text/html; charset=utf-8", 200),
+                        Err(_) => (
+                            render_newtab(&ctx).into_bytes(),
+                            "text/html; charset=utf-8",
+                            200,
+                        ),
                     }
                 } else {
-                    (render_newtab(&ctx).into_bytes(), "text/html; charset=utf-8", 200)
+                    (
+                        render_newtab(&ctx).into_bytes(),
+                        "text/html; charset=utf-8",
+                        200,
+                    )
                 }
-            },
-            "about" | "version" => (render_about(&ctx).into_bytes(), "text/html; charset=utf-8", 200),
+            }
+            "about" | "version" => (
+                render_about(&ctx).into_bytes(),
+                "text/html; charset=utf-8",
+                200,
+            ),
             "error" => (
                 render_error(
                     &ctx,
-                    query.get("title").map(String::as_str).unwrap_or("No se puede acceder a esta página"),
+                    query
+                        .get("title")
+                        .map(String::as_str)
+                        .unwrap_or("No se puede acceder a esta página"),
                     query.get("message").map(String::as_str).unwrap_or(""),
                     query.get("url").map(String::as_str).unwrap_or(""),
                 )
@@ -146,8 +173,13 @@ impl ProtocolHandler for FerroHandler {
             "logo.svg" | "logo" => (LOGO_SVG.as_bytes().to_vec(), "image/svg+xml", 200),
             "blank" => (b"<!doctype html><title></title>".to_vec(), "text/html", 200),
             _ => (
-                render_error(&ctx, "Página interna desconocida", "Esta página de FerroSurf no existe.", url.as_str())
-                    .into_bytes(),
+                render_error(
+                    &ctx,
+                    "Página interna desconocida",
+                    "Esta página de FerroSurf no existe.",
+                    url.as_str(),
+                )
+                .into_bytes(),
                 "text/html; charset=utf-8",
                 404,
             ),
@@ -238,23 +270,19 @@ impl ProtocolHandler for ExtensionHandler {
 
 pub fn protocol_registry(ctx: SharedPageContext) -> ProtocolRegistry {
     let mut registry = ProtocolRegistry::default();
-    if registry.register("ferro", FerroHandler { ctx: ctx.clone() }).is_err() {
+    if registry
+        .register("ferro", FerroHandler { ctx: ctx.clone() })
+        .is_err()
+    {
         log::error!("could not register ferro:// handler");
     }
-    if registry.register("ferro-extension", ExtensionHandler { ctx }).is_err() {
+    if registry
+        .register("ferro-extension", ExtensionHandler { ctx })
+        .is_err()
+    {
         log::error!("could not register ferro-extension:// handler");
     }
     registry
-}
-
-/// URL of the internal error page for a failed navigation.
-pub fn error_url(title: &str, message: &str, failed: &str) -> url::Url {
-    let mut u = url::Url::parse("ferro://error/").unwrap();
-    u.query_pairs_mut()
-        .append_pair("title", title)
-        .append_pair("message", message)
-        .append_pair("url", failed);
-    u
 }
 
 #[cfg(test)]
@@ -271,11 +299,18 @@ mod tests {
             top_sites: vec![("</script>".into(), "https://x.org".into())],
             ..Default::default()
         };
+        let unfilled = |h: &str| {
+            h.match_indices("{{").any(|(i, _)| {
+                h[i + 2..].split("}}").next().is_some_and(|k| {
+                    !k.is_empty() && k.chars().all(|c| c.is_ascii_uppercase() || c == '_')
+                })
+            })
+        };
         let html = render_newtab(&ctx);
-        assert!(!html.contains("{{"));
+        assert!(!unfilled(&html));
         assert!(!html.contains("</script>\""));
         assert!(html.contains("Duck\\\"Duck"));
-        assert!(!render_about(&ctx).contains("{{"));
-        assert!(!render_error(&ctx, "a", "b", "c").contains("{{"));
+        assert!(!unfilled(&render_about(&ctx)));
+        assert!(!unfilled(&render_error(&ctx, "a", "b", "c")));
     }
 }

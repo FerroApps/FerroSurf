@@ -85,7 +85,10 @@ impl PermissionStore {
     pub fn open(path: impl Into<PathBuf>) -> Self {
         let path = path.into();
         let map = crate::storage::read_json_or_default::<Map>(&path);
-        Self { path: Some(path), map }
+        Self {
+            path: Some(path),
+            map,
+        }
     }
 
     pub fn in_memory() -> Self {
@@ -110,7 +113,10 @@ impl PermissionStore {
                 }
             }
         } else {
-            self.map.entry(origin.to_string()).or_default().insert(kind, decision);
+            self.map
+                .entry(origin.to_string())
+                .or_default()
+                .insert(kind, decision);
         }
         self.persist();
     }
@@ -169,7 +175,10 @@ mod tests {
         s.set(&o, PermissionKind::Other("foo".into()), Decision::Deny);
         let s2 = PermissionStore::open(&p);
         assert_eq!(s2.get(&o, &PermissionKind::Camera), Decision::Allow);
-        assert_eq!(s2.get(&o, &PermissionKind::Other("foo".into())), Decision::Deny);
+        assert_eq!(
+            s2.get(&o, &PermissionKind::Other("foo".into())),
+            Decision::Deny
+        );
         assert_eq!(s2.all().len(), 2);
         let raw = std::fs::read_to_string(&p).unwrap();
         assert!(raw.contains("\"allow\"") && raw.contains("\"camera\""));

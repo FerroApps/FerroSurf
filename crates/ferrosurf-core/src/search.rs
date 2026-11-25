@@ -62,7 +62,9 @@ pub fn builtin_engines() -> Vec<SearchEngine> {
             "google",
             "Google",
             "https://www.google.com/search?q={searchTerms}",
-            Some("https://suggestqueries.google.com/complete/search?client=firefox&q={searchTerms}"),
+            Some(
+                "https://suggestqueries.google.com/complete/search?client=firefox&q={searchTerms}",
+            ),
             "g",
         ),
         SearchEngine::new(
@@ -171,7 +173,10 @@ mod tests {
 
     #[test]
     fn suggestions() {
-        assert_eq!(parse_suggestions(r#"["ru",["rust","ruby"]]"#), vec!["rust", "ruby"]);
+        assert_eq!(
+            parse_suggestions(r#"["ru",["rust","ruby"]]"#),
+            vec!["rust", "ruby"]
+        );
         assert_eq!(parse_suggestions(r#"[{"phrase":"rust"}]"#), vec!["rust"]);
         assert!(parse_suggestions("nope").is_empty());
     }

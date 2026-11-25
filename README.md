@@ -14,6 +14,16 @@ pestañas, perfiles, marcadores, historial, descargas, extensiones, bloqueador d
 asistente IA y **soporte nativo del Model Context Protocol (MCP)** tanto como servidor (los
 agentes de IA pueden manejar el navegador) como cliente (el asistente puede usar tus servidores MCP).
 
+<p align="center"><img src="docs/screenshots/asistente.png" width="860" alt="FerroSurf con el asistente IA leyendo la página"></p>
+
+| | |
+|---|---|
+| ![Nueva pestaña y sugerencias](docs/screenshots/nueva-pestana.png) | ![Paleta de comandos](docs/screenshots/paleta.png) |
+| ![Historial y buscar en la página](docs/screenshots/historial-buscar.png) | ![Ajustes](docs/screenshots/ajustes.png) |
+| ![Pestañas verticales y menú contextual](docs/screenshots/pestanas-verticales.png) | ![Extensión con content script y bloqueo DNR](docs/screenshots/extension.png) |
+
+*Capturas reales de FerroSurf renderizando con Servo (Linux, Xvfb).*
+
 ## Funciones
 
 | Área | Qué incluye |
@@ -56,6 +66,7 @@ ferrosurf [URL...]                 # abre URLs o búsquedas
 ferrosurf --profile Trabajo        # perfil concreto (nombre o id)
 ferrosurf --guest                  # ventana de invitado efímera
 ferrosurf --mcp-stdio              # puente MCP por stdio hacia el navegador en ejecución
+ferrosurf --load-extension ./mi-extension         # carga una extensión desempaquetada
 ferrosurf --screenshot out.png https://servo.org   # captura y sale (útil para pruebas)
 ```
 

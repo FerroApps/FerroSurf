@@ -18,9 +18,10 @@ use std::path::{Path, PathBuf};
 /// Root data directory. Overridable with `FERROSURF_HOME` for portable installs and tests.
 pub fn data_root() -> PathBuf {
     if let Ok(dir) = std::env::var("FERROSURF_HOME")
-        && !dir.is_empty() {
-            return PathBuf::from(dir);
-        }
+        && !dir.is_empty()
+    {
+        return PathBuf::from(dir);
+    }
     directories::ProjectDirs::from("org", "FerroApps", "FerroSurf")
         .map(|d| d.data_dir().to_path_buf())
         .unwrap_or_else(|| PathBuf::from(".ferrosurf"))

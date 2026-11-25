@@ -61,7 +61,9 @@ struct Roots {
 }
 
 pub fn detect_browsers() -> Vec<DetectedBrowser> {
-    let Some(dirs) = directories::BaseDirs::new() else { return Vec::new() };
+    let Some(dirs) = directories::BaseDirs::new() else {
+        return Vec::new();
+    };
     let roots = Roots {
         home: dirs.home_dir().to_path_buf(),
         config: dirs.config_dir().to_path_buf(),
@@ -76,19 +78,48 @@ fn detect_in(r: &Roots, windows: bool) -> Vec<DetectedBrowser> {
     // (kind, user data dir, profiles live directly in it)
     let chromium: Vec<(BrowserKind, PathBuf, bool)> = if windows {
         vec![
-            (BrowserKind::Chrome, r.local_appdata.join("Google/Chrome/User Data"), false),
-            (BrowserKind::Chromium, r.local_appdata.join("Chromium/User Data"), false),
-            (BrowserKind::Edge, r.local_appdata.join("Microsoft/Edge/User Data"), false),
-            (BrowserKind::Brave, r.local_appdata.join("BraveSoftware/Brave-Browser/User Data"), false),
-            (BrowserKind::Vivaldi, r.local_appdata.join("Vivaldi/User Data"), false),
-            (BrowserKind::Opera, r.appdata.join("Opera Software/Opera Stable"), true),
+            (
+                BrowserKind::Chrome,
+                r.local_appdata.join("Google/Chrome/User Data"),
+                false,
+            ),
+            (
+                BrowserKind::Chromium,
+                r.local_appdata.join("Chromium/User Data"),
+                false,
+            ),
+            (
+                BrowserKind::Edge,
+                r.local_appdata.join("Microsoft/Edge/User Data"),
+                false,
+            ),
+            (
+                BrowserKind::Brave,
+                r.local_appdata
+                    .join("BraveSoftware/Brave-Browser/User Data"),
+                false,
+            ),
+            (
+                BrowserKind::Vivaldi,
+                r.local_appdata.join("Vivaldi/User Data"),
+                false,
+            ),
+            (
+                BrowserKind::Opera,
+                r.appdata.join("Opera Software/Opera Stable"),
+                true,
+            ),
         ]
     } else {
         vec![
             (BrowserKind::Chrome, r.config.join("google-chrome"), false),
             (BrowserKind::Chromium, r.config.join("chromium"), false),
             (BrowserKind::Edge, r.config.join("microsoft-edge"), false),
-            (BrowserKind::Brave, r.config.join("BraveSoftware/Brave-Browser"), false),
+            (
+                BrowserKind::Brave,
+                r.config.join("BraveSoftware/Brave-Browser"),
+                false,
+            ),
             (BrowserKind::Vivaldi, r.config.join("vivaldi"), false),
             (BrowserKind::Opera, r.config.join("opera"), true),
         ]
@@ -96,11 +127,17 @@ fn detect_in(r: &Roots, windows: bool) -> Vec<DetectedBrowser> {
     for (kind, base, direct) in chromium {
         if direct {
             if has_chromium_data(&base) {
-                out.push(DetectedBrowser { kind, name: kind.display_name().to_string(), profile_dir: base });
+                out.push(DetectedBrowser {
+                    kind,
+                    name: kind.display_name().to_string(),
+                    profile_dir: base,
+                });
             }
             continue;
         }
-        let Ok(rd) = fs::read_dir(&base) else { continue };
+        let Ok(rd) = fs::read_dir(&base) else {
+            continue;
+        };
         let mut profiles: Vec<PathBuf> = rd
             .filter_map(Result::ok)
             .map(|e| e.path())
@@ -112,7 +149,11 @@ fn detect_in(r: &Roots, windows: bool) -> Vec<DetectedBrowser> {
         profiles.sort();
         for p in profiles {
             let pname = p.file_name().unwrap().to_string_lossy().into_owned();
-            out.push(DetectedBrowser { kind, name: format!("{} — {}", kind.display_name(), pname), profile_dir: p });
+            out.push(DetectedBrowser {
+                kind,
+                name: format!("{} — {}", kind.display_name(), pname),
+                profile_dir: p,
+            });
         }
     }
 
@@ -124,10 +165,20 @@ fn detect_in(r: &Roots, windows: bool) -> Vec<DetectedBrowser> {
     } else {
         vec![
             (BrowserKind::Firefox, r.home.join(".mozilla/firefox")),
-            (BrowserKind::Firefox, r.home.join("snap/firefox/common/.mozilla/firefox")),
-            (BrowserKind::Firefox, r.home.join(".var/app/org.mozilla.firefox/.mozilla/firefox")),
+            (
+                BrowserKind::Firefox,
+                r.home.join("snap/firefox/common/.mozilla/firefox"),
+            ),
+            (
+                BrowserKind::Firefox,
+                r.home.join(".var/app/org.mozilla.firefox/.mozilla/firefox"),
+            ),
             (BrowserKind::LibreWolf, r.home.join(".librewolf")),
-            (BrowserKind::LibreWolf, r.home.join(".var/app/io.gitlab.librewolf-community/.librewolf")),
+            (
+                BrowserKind::LibreWolf,
+                r.home
+                    .join(".var/app/io.gitlab.librewolf-community/.librewolf"),
+            ),
         ]
     };
     for (kind, base) in firefox_roots {
@@ -157,10 +208,21 @@ fn firefox_profiles(base: &Path) -> Vec<(String, PathBuf)> {
         let mut path = String::new();
         let mut relative = true;
         let mut in_profile = false;
-        let flush = |name: &mut String, path: &mut String, relative: &mut bool, out: &mut Vec<(String, PathBuf)>| {
+        let flush = |name: &mut String,
+                     path: &mut String,
+                     relative: &mut bool,
+                     out: &mut Vec<(String, PathBuf)>| {
             if !path.is_empty() {
-                let p = if *relative { base.join(&*path) } else { PathBuf::from(&*path) };
-                let n = if name.is_empty() { path.clone() } else { name.clone() };
+                let p = if *relative {
+                    base.join(&*path)
+                } else {
+                    PathBuf::from(&*path)
+                };
+                let n = if name.is_empty() {
+                    path.clone()
+                } else {
+                    name.clone()
+                };
                 out.push((n, p));
             }
             name.clear();
@@ -178,7 +240,7 @@ fn firefox_profiles(base: &Path) -> Vec<(String, PathBuf)> {
                     "name" => name = v.trim().to_string(),
                     "path" => path = v.trim().to_string(),
                     "isrelative" => relative = v.trim() != "0",
-                    _ => {},
+                    _ => {}
                 }
             }
         }
@@ -193,13 +255,24 @@ fn firefox_profiles(base: &Path) -> Vec<(String, PathBuf)> {
     }
     for d in scan_dirs {
         let Ok(rd) = fs::read_dir(&d) else { continue };
-        let mut found: Vec<PathBuf> = rd.filter_map(Result::ok).map(|e| e.path()).filter(|p| p.is_dir()).collect();
+        let mut found: Vec<PathBuf> = rd
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| p.is_dir())
+            .collect();
         found.sort();
         for p in found {
-            let n = p.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+            let n = p
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_string();
             let under_profiles = d != base;
             if (under_profiles || n.contains(".default")) && !out.iter().any(|(_, o)| *o == p) {
-                let display = n.split_once('.').map(|(_, s)| s.to_string()).unwrap_or_else(|| n.clone());
+                let display = n
+                    .split_once('.')
+                    .map(|(_, s)| s.to_string())
+                    .unwrap_or_else(|| n.clone());
                 out.push((display, p));
             }
         }
@@ -230,8 +303,15 @@ fn read_chromium_bookmarks(path: &Path) -> anyhow::Result<Vec<ImportedBookmark>>
     let data = fs::read(path).with_context(|| format!("reading {}", path.display()))?;
     let json: Value = serde_json::from_slice(&data).context("parsing Bookmarks JSON")?;
     let mut out = Vec::new();
-    let roots = json.get("roots").and_then(Value::as_object).context("missing roots")?;
-    for (key, label) in [("bookmark_bar", "Toolbar"), ("other", "Other"), ("synced", "Mobile")] {
+    let roots = json
+        .get("roots")
+        .and_then(Value::as_object)
+        .context("missing roots")?;
+    for (key, label) in [
+        ("bookmark_bar", "Toolbar"),
+        ("other", "Other"),
+        ("synced", "Mobile"),
+    ] {
         if let Some(node) = roots.get(key) {
             let mut stack = vec![label.to_string()];
             walk_chromium(node, &mut stack, &mut out);
@@ -241,23 +321,33 @@ fn read_chromium_bookmarks(path: &Path) -> anyhow::Result<Vec<ImportedBookmark>>
 }
 
 fn walk_chromium(node: &Value, path: &mut Vec<String>, out: &mut Vec<ImportedBookmark>) {
-    let Some(children) = node.get("children").and_then(Value::as_array) else { return };
+    let Some(children) = node.get("children").and_then(Value::as_array) else {
+        return;
+    };
     for c in children {
-        let name = c.get("name").and_then(Value::as_str).unwrap_or("").to_string();
+        let name = c
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
         match c.get("type").and_then(Value::as_str) {
             Some("url") => {
                 let url = c.get("url").and_then(Value::as_str).unwrap_or("");
                 if importable_url(url) {
-                    let title = if name.trim().is_empty() { url.to_string() } else { name };
+                    let title = if name.trim().is_empty() {
+                        url.to_string()
+                    } else {
+                        name
+                    };
                     out.push((path.clone(), title, url.to_string()));
                 }
-            },
+            }
             Some("folder") => {
                 path.push(name);
                 walk_chromium(c, path, out);
                 path.pop();
-            },
-            _ => {},
+            }
+            _ => {}
         }
     }
 }
@@ -290,13 +380,16 @@ impl TempDb {
         }
         let conn = Connection::open_with_flags(&dst, OpenFlags::SQLITE_OPEN_READ_WRITE);
         match conn {
-            Ok(conn) => Ok(Self { conn: Some(conn), files }),
+            Ok(conn) => Ok(Self {
+                conn: Some(conn),
+                files,
+            }),
             Err(e) => {
                 for f in &files {
                     let _ = fs::remove_file(f);
                 }
                 Err(e.into())
-            },
+            }
         }
     }
 
@@ -351,7 +444,9 @@ fn read_firefox_bookmarks(path: &Path) -> anyhow::Result<Vec<ImportedBookmark>> 
         if n.kind != 1 {
             continue;
         }
-        let Some(url) = n.url.as_deref().filter(|u| importable_url(u)) else { continue };
+        let Some(url) = n.url.as_deref().filter(|u| importable_url(u)) else {
+            continue;
+        };
         // Walk up through folders.
         let mut path = Vec::new();
         let mut cur = n.parent;
@@ -381,7 +476,11 @@ fn read_firefox_bookmarks(path: &Path) -> anyhow::Result<Vec<ImportedBookmark>> 
             cur = p.parent;
         }
         path.reverse();
-        let title = if n.title.trim().is_empty() { url.to_string() } else { n.title.clone() };
+        let title = if n.title.trim().is_empty() {
+            url.to_string()
+        } else {
+            n.title.clone()
+        };
         out.push((path, title, url.to_string()));
     }
     Ok(out)
@@ -396,7 +495,10 @@ const WEBKIT_EPOCH_OFFSET_MS: i64 = 11_644_473_600_000;
 
 fn is_web_url(url: &str) -> bool {
     let l = url.get(..8).unwrap_or(url).to_ascii_lowercase();
-    l.starts_with("http://") || l.starts_with("https://") || l.starts_with("file://") || l.starts_with("ftp://")
+    l.starts_with("http://")
+        || l.starts_with("https://")
+        || l.starts_with("file://")
+        || l.starts_with("ftp://")
 }
 
 /// Import up to `max` most recently visited history entries. Returns how many were imported.
@@ -475,7 +577,14 @@ mod tests {
         };
         let bm = read_bookmarks(&b).unwrap();
         assert_eq!(bm.len(), 4);
-        assert_eq!(bm[0], (vec!["Toolbar".to_string()], "Servo".to_string(), "https://servo.org/".to_string()));
+        assert_eq!(
+            bm[0],
+            (
+                vec!["Toolbar".to_string()],
+                "Servo".to_string(),
+                "https://servo.org/".to_string()
+            )
+        );
         assert_eq!(bm[1].0, vec!["Toolbar", "Dev"]);
         assert_eq!(bm[2].0, vec!["Toolbar", "Dev", "Deep"]);
         assert_eq!(bm[2].1, "https://deep.test/");
@@ -518,7 +627,10 @@ mod tests {
         let h = History::in_memory().unwrap();
         assert_eq!(import_history(&b, &h, 100).unwrap(), 2);
         let a = h.get("https://a.test/").unwrap().unwrap();
-        assert_eq!((a.visit_count, a.typed_count, a.last_visit_ms), (5, 2, 1_704_067_200_000));
+        assert_eq!(
+            (a.visit_count, a.typed_count, a.last_visit_ms),
+            (5, 2, 1_704_067_200_000)
+        );
         assert_eq!(h.count().unwrap(), 2);
         // Limit applies to the most recent entries.
         let h2 = History::in_memory().unwrap();
@@ -561,18 +673,39 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let prof = dir.path().join("abc.default-release");
         make_places(&prof.join("places.sqlite"));
-        let b = DetectedBrowser { kind: BrowserKind::Firefox, name: "Firefox — x".into(), profile_dir: prof };
+        let b = DetectedBrowser {
+            kind: BrowserKind::Firefox,
+            name: "Firefox — x".into(),
+            profile_dir: prof,
+        };
         let bm = read_bookmarks(&b).unwrap();
         assert_eq!(bm.len(), 4, "{bm:?}");
-        assert_eq!(bm[0], (vec!["Toolbar".into()], "Servo (toolbar)".into(), "https://servo.org/".into()));
+        assert_eq!(
+            bm[0],
+            (
+                vec!["Toolbar".into()],
+                "Servo (toolbar)".into(),
+                "https://servo.org/".into()
+            )
+        );
         assert_eq!(bm[1].0, vec!["Toolbar", "News", "Tech"]);
-        assert_eq!(bm[2], (vec!["Menu".into()], "https://menu.test/".into(), "https://menu.test/".into()));
+        assert_eq!(
+            bm[2],
+            (
+                vec!["Menu".into()],
+                "https://menu.test/".into(),
+                "https://menu.test/".into()
+            )
+        );
         assert_eq!(bm[3].0, vec!["Other"]);
 
         let h = History::in_memory().unwrap();
         assert_eq!(import_history(&b, &h, 100).unwrap(), 2);
         let e = h.get("https://servo.org/").unwrap().unwrap();
-        assert_eq!((e.visit_count, e.typed_count, e.last_visit_ms), (4, 1, 1_704_067_200_000));
+        assert_eq!(
+            (e.visit_count, e.typed_count, e.last_visit_ms),
+            (4, 1, 1_704_067_200_000)
+        );
         assert!(h.get("about:config").unwrap().is_none());
     }
 
@@ -588,13 +721,19 @@ mod tests {
         };
         write(&home.join(".config/google-chrome/Default/Bookmarks"), "{}");
         write(&home.join(".config/google-chrome/Profile 2/History"), "");
-        write(&home.join(".config/google-chrome/System Profile/History"), "");
+        write(
+            &home.join(".config/google-chrome/System Profile/History"),
+            "",
+        );
         write(&home.join(".config/opera/Bookmarks"), "{}");
         write(
             &home.join(".mozilla/firefox/profiles.ini"),
             "[Profile0]\nName=default-release\nIsRelative=1\nPath=xyz.default-release\n\n[General]\nStartWithLastProfile=1\n",
         );
-        write(&home.join(".mozilla/firefox/xyz.default-release/places.sqlite"), "");
+        write(
+            &home.join(".mozilla/firefox/xyz.default-release/places.sqlite"),
+            "",
+        );
         write(&home.join(".mozilla/firefox/old.default/places.sqlite"), "");
         let found = detect_in(&r, false);
         let names: Vec<&str> = found.iter().map(|b| b.name.as_str()).collect();
@@ -610,15 +749,32 @@ mod tests {
         );
         assert_eq!(found[3].kind, BrowserKind::Firefox);
 
-        write(&home.join("Local/Microsoft/Edge/User Data/Default/Bookmarks"), "{}");
-        write(&home.join("Roaming/Opera Software/Opera Stable/History"), "");
-        write(&home.join("Roaming/Mozilla/Firefox/Profiles/q1.default/places.sqlite"), "");
-        write(&home.join("Roaming/librewolf/Profiles/z9.default-default/places.sqlite"), "");
+        write(
+            &home.join("Local/Microsoft/Edge/User Data/Default/Bookmarks"),
+            "{}",
+        );
+        write(
+            &home.join("Roaming/Opera Software/Opera Stable/History"),
+            "",
+        );
+        write(
+            &home.join("Roaming/Mozilla/Firefox/Profiles/q1.default/places.sqlite"),
+            "",
+        );
+        write(
+            &home.join("Roaming/librewolf/Profiles/z9.default-default/places.sqlite"),
+            "",
+        );
         let found = detect_in(&r, true);
         let names: Vec<&str> = found.iter().map(|b| b.name.as_str()).collect();
         assert_eq!(
             names,
-            vec!["Microsoft Edge — Default", "Opera", "Firefox — default", "LibreWolf — default-default"]
+            vec![
+                "Microsoft Edge — Default",
+                "Opera",
+                "Firefox — default",
+                "LibreWolf — default-default"
+            ]
         );
     }
 }

@@ -4,7 +4,10 @@
 pub(crate) fn http_client_for(url: &str) -> reqwest::Client {
     let loopback = url::Url::parse(url)
         .ok()
-        .and_then(|u| u.host_str().map(|h| matches!(h, "localhost" | "127.0.0.1" | "::1" | "[::1]")))
+        .and_then(|u| {
+            u.host_str()
+                .map(|h| matches!(h, "localhost" | "127.0.0.1" | "::1" | "[::1]"))
+        })
         .unwrap_or(false);
     let mut b = reqwest::Client::builder().connect_timeout(std::time::Duration::from_secs(15));
     if loopback {

@@ -7,13 +7,13 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use axum::Router;
 use axum::body::{Body, Bytes};
 use axum::extract::State;
-use axum::http::{header, HeaderMap, HeaderValue, Method, StatusCode, Uri};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri, header};
 use axum::response::Response as HttpResponse;
-use axum::Router;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::jsonrpc::{self, Response};
@@ -81,14 +81,25 @@ pub struct ToolOutput {
 
 impl ToolOutput {
     pub fn text(s: impl Into<String>) -> Self {
-        Self { content: vec![Content::Text(s.into())], is_error: false, structured: None }
+        Self {
+            content: vec![Content::Text(s.into())],
+            is_error: false,
+            structured: None,
+        }
     }
     pub fn error(s: impl Into<String>) -> Self {
-        Self { content: vec![Content::Text(s.into())], is_error: true, structured: None }
+        Self {
+            content: vec![Content::Text(s.into())],
+            is_error: true,
+            structured: None,
+        }
     }
     pub fn image(data_base64: impl Into<String>, mime: impl Into<String>) -> Self {
         Self {
-            content: vec![Content::Image { data_base64: data_base64.into(), mime: mime.into() }],
+            content: vec![Content::Image {
+                data_base64: data_base64.into(),
+                mime: mime.into(),
+            }],
             is_error: false,
             structured: None,
         }
@@ -97,7 +108,13 @@ impl ToolOutput {
     pub fn text_content(&self) -> String {
         self.content
             .iter()
-            .filter_map(|c| if let Content::Text(t) = c { Some(t.as_str()) } else { None })
+            .filter_map(|c| {
+                if let Content::Text(t) = c {
+                    Some(t.as_str())
+                } else {
+                    None
+                }
+            })
             .collect::<Vec<_>>()
             .join("\n")
     }
@@ -151,7 +168,8 @@ impl McpServer {
             Value::Array(items) => {
                 if items.is_empty() {
                     return Some(
-                        Response::err(Value::Null, jsonrpc::INVALID_REQUEST, "empty batch").to_value(),
+                        Response::err(Value::Null, jsonrpc::INVALID_REQUEST, "empty batch")
+                            .to_value(),
                     );
                 }
                 let mut out = Vec::new();
@@ -160,7 +178,11 @@ impl McpServer {
                         out.push(r);
                     }
                 }
-                if out.is_empty() { None } else { Some(Value::Array(out)) }
+                if out.is_empty() {
+                    None
+                } else {
+                    Some(Value::Array(out))
+                }
             }
             other => self.handle_one(other).await,
         }
@@ -169,7 +191,12 @@ impl McpServer {
     async fn handle_one(&self, msg: Value) -> Option<Value> {
         let Some(obj) = msg.as_object() else {
             return Some(
-                Response::err(Value::Null, jsonrpc::INVALID_REQUEST, "request must be an object").to_value(),
+                Response::err(
+                    Value::Null,
+                    jsonrpc::INVALID_REQUEST,
+                    "request must be an object",
+                )
+                .to_value(),
             );
         };
         let id = obj.get("id").cloned();
@@ -179,7 +206,12 @@ impl McpServer {
                 return None;
             }
             return Some(
-                Response::err(id.unwrap_or(Value::Null), jsonrpc::INVALID_REQUEST, "missing method").to_value(),
+                Response::err(
+                    id.unwrap_or(Value::Null),
+                    jsonrpc::INVALID_REQUEST,
+                    "missing method",
+                )
+                .to_value(),
             );
         };
         let params = obj.get("params").cloned().unwrap_or(Value::Null);
@@ -198,7 +230,10 @@ impl McpServer {
     async fn dispatch(&self, method: &str, params: Value) -> Result<Value, (i64, String)> {
         match method {
             "initialize" => {
-                let requested = params.get("protocolVersion").and_then(Value::as_str).unwrap_or("");
+                let requested = params
+                    .get("protocolVersion")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
                 let version = SUPPORTED_PROTOCOL_VERSIONS
                     .iter()
                     .find(|v| **v == requested)
@@ -232,14 +267,22 @@ impl McpServer {
                 let args = match params.get("arguments") {
                     None | Some(Value::Null) => json!({}),
                     Some(v) if v.is_object() => v.clone(),
-                    Some(_) => return Err((jsonrpc::INVALID_PARAMS, "arguments must be an object".into())),
+                    Some(_) => {
+                        return Err((
+                            jsonrpc::INVALID_PARAMS,
+                            "arguments must be an object".into(),
+                        ));
+                    }
                 };
                 Ok(self.handler.call(&name, args).await.to_json())
             }
             "resources/list" => Ok(json!({"resources": []})),
             "resources/templates/list" => Ok(json!({"resourceTemplates": []})),
             "prompts/list" => Ok(json!({"prompts": []})),
-            _ => Err((jsonrpc::METHOD_NOT_FOUND, format!("method not found: {method}"))),
+            _ => Err((
+                jsonrpc::METHOD_NOT_FOUND,
+                format!("method not found: {method}"),
+            )),
         }
     }
 }
@@ -285,13 +328,22 @@ pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 }
 
 pub fn generate_token() -> String {
-    format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple())
+    format!(
+        "{}{}",
+        uuid::Uuid::new_v4().simple(),
+        uuid::Uuid::new_v4().simple()
+    )
 }
 
 fn origin_allowed(origin: &str) -> bool {
-    let Ok(u) = url::Url::parse(origin) else { return false };
+    let Ok(u) = url::Url::parse(origin) else {
+        return false;
+    };
     matches!(u.scheme(), "http" | "https")
-        && matches!(u.host_str(), Some("localhost" | "127.0.0.1" | "[::1]" | "::1"))
+        && matches!(
+            u.host_str(),
+            Some("localhost" | "127.0.0.1" | "[::1]" | "::1")
+        )
 }
 
 fn http_reply(status: StatusCode, body: Option<Value>) -> HttpResponse {
@@ -323,16 +375,26 @@ async fn http_handler(
     if let Some(origin) = headers.get(header::ORIGIN)
         && !origin.to_str().map(origin_allowed).unwrap_or(false)
     {
-        return http_reply(StatusCode::FORBIDDEN, Some(json!({"error":"origin not allowed"})));
+        return http_reply(
+            StatusCode::FORBIDDEN,
+            Some(json!({"error":"origin not allowed"})),
+        );
     }
     let presented = headers
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer ").or_else(|| v.strip_prefix("bearer ")))
+        .and_then(|v| {
+            v.strip_prefix("Bearer ")
+                .or_else(|| v.strip_prefix("bearer "))
+        })
         .unwrap_or("");
     if !constant_time_eq(presented.as_bytes(), st.token.as_bytes()) {
-        let mut r = http_reply(StatusCode::UNAUTHORIZED, Some(json!({"error":"unauthorized"})));
-        r.headers_mut().insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));
+        let mut r = http_reply(
+            StatusCode::UNAUTHORIZED,
+            Some(json!({"error":"unauthorized"})),
+        );
+        r.headers_mut()
+            .insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));
         return r;
     }
     match method {
@@ -342,7 +404,14 @@ async fn http_handler(
                 Err(e) => {
                     return http_reply(
                         StatusCode::BAD_REQUEST,
-                        Some(Response::err(Value::Null, jsonrpc::PARSE_ERROR, format!("parse error: {e}")).to_value()),
+                        Some(
+                            Response::err(
+                                Value::Null,
+                                jsonrpc::PARSE_ERROR,
+                                format!("parse error: {e}"),
+                            )
+                            .to_value(),
+                        ),
                     );
                 }
             };
@@ -363,7 +432,8 @@ async fn http_handler(
         }
         Method::GET => {
             let mut r = http_reply(StatusCode::METHOD_NOT_ALLOWED, None);
-            r.headers_mut().insert(header::ALLOW, HeaderValue::from_static("POST, DELETE"));
+            r.headers_mut()
+                .insert(header::ALLOW, HeaderValue::from_static("POST, DELETE"));
             r
         }
         Method::DELETE => http_reply(StatusCode::OK, None),
@@ -389,8 +459,13 @@ pub fn spawn_http_server(
     };
     listener.set_nonblocking(true)?;
     let port = listener.local_addr()?.port();
-    let token = token.filter(|t| !t.is_empty()).unwrap_or_else(generate_token);
-    let state = HttpState { server: McpServer::new(handler), token: token.clone() };
+    let token = token
+        .filter(|t| !t.is_empty())
+        .unwrap_or_else(generate_token);
+    let state = HttpState {
+        server: McpServer::new(handler),
+        token: token.clone(),
+    };
     let app = Router::new().fallback(http_handler).with_state(state);
     let (tx, rx) = tokio::sync::oneshot::channel::<()>();
     rt.spawn(async move {
@@ -449,7 +524,12 @@ where
         }
         let reply = match serde_json::from_str::<Value>(trimmed) {
             Err(e) => Some(
-                Response::err(Value::Null, jsonrpc::PARSE_ERROR, format!("parse error: {e}")).to_value(),
+                Response::err(
+                    Value::Null,
+                    jsonrpc::PARSE_ERROR,
+                    format!("parse error: {e}"),
+                )
+                .to_value(),
             ),
             Ok(msg) => {
                 let ids = request_ids(&msg);
@@ -458,7 +538,14 @@ where
                     Err(e) => {
                         let errs: Vec<Value> = ids
                             .into_iter()
-                            .map(|id| Response::err(id, jsonrpc::INTERNAL_ERROR, format!("bridge error: {e:#}")).to_value())
+                            .map(|id| {
+                                Response::err(
+                                    id,
+                                    jsonrpc::INTERNAL_ERROR,
+                                    format!("bridge error: {e:#}"),
+                                )
+                                .to_value()
+                            })
                             .collect();
                         match errs.len() {
                             0 => {
@@ -484,7 +571,11 @@ where
 /// Ids of the requests (not notifications) contained in a message or batch.
 fn request_ids(msg: &Value) -> Vec<Value> {
     let one = |v: &Value| -> Option<Value> {
-        if v.get("method").is_some() { v.get("id").filter(|i| !i.is_null()).cloned() } else { None }
+        if v.get("method").is_some() {
+            v.get("id").filter(|i| !i.is_null()).cloned()
+        } else {
+            None
+        }
     };
     match msg {
         Value::Array(a) => a.iter().filter_map(one).collect(),
@@ -508,8 +599,15 @@ async fn forward(
     if let Some(s) = session.as_deref() {
         req = req.header("Mcp-Session-Id", s);
     }
-    let resp = req.send().await.context("POST to FerroSurf MCP server failed")?;
-    if let Some(s) = resp.headers().get("mcp-session-id").and_then(|v| v.to_str().ok()) {
+    let resp = req
+        .send()
+        .await
+        .context("POST to FerroSurf MCP server failed")?;
+    if let Some(s) = resp
+        .headers()
+        .get("mcp-session-id")
+        .and_then(|v| v.to_str().ok())
+    {
         *session = Some(s.to_string());
     }
     let status = resp.status();
@@ -523,7 +621,11 @@ async fn forward(
     if status == StatusCode::ACCEPTED || (status.is_success() && text.trim().is_empty()) {
         return Ok(None);
     }
-    if !status.is_success() && serde_json::from_str::<Value>(&text).map(|v| v.get("jsonrpc").is_none()).unwrap_or(true) {
+    if !status.is_success()
+        && serde_json::from_str::<Value>(&text)
+            .map(|v| v.get("jsonrpc").is_none())
+            .unwrap_or(true)
+    {
         anyhow::bail!("HTTP {status}: {}", crate::util::truncate_chars(&text, 300));
     }
     if is_sse {
@@ -539,7 +641,9 @@ async fn forward(
             _ => Some(Value::Array(out)),
         });
     }
-    Ok(Some(serde_json::from_str(&text).context("invalid JSON from server")?))
+    Ok(Some(
+        serde_json::from_str(&text).context("invalid JSON from server")?,
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -599,7 +703,9 @@ pub(crate) mod test_support {
             let name = name.to_string();
             Box::pin(async move {
                 match name.as_str() {
-                    "echo" => ToolOutput::text(format!("echo:{}", args["text"].as_str().unwrap_or(""))),
+                    "echo" => {
+                        ToolOutput::text(format!("echo:{}", args["text"].as_str().unwrap_or("")))
+                    }
                     "pic" => ToolOutput::image("AAAA", "image/png"),
                     _ => ToolOutput::error("boom"),
                 }
@@ -641,7 +747,10 @@ mod tests {
     #[tokio::test]
     async fn list_call_unknown_ping() {
         let s = srv();
-        let r = s.handle(json!({"jsonrpc":"2.0","id":"x","method":"tools/list"})).await.unwrap();
+        let r = s
+            .handle(json!({"jsonrpc":"2.0","id":"x","method":"tools/list"}))
+            .await
+            .unwrap();
         assert_eq!(r["id"], "x");
         let tools = r["result"]["tools"].as_array().unwrap();
         assert_eq!(tools.len(), 3);
@@ -674,21 +783,37 @@ mod tests {
             .unwrap();
         assert_eq!(r["error"]["code"], jsonrpc::INVALID_PARAMS);
 
-        let r = s.handle(json!({"jsonrpc":"2.0","id":6,"method":"bogus/method"})).await.unwrap();
+        let r = s
+            .handle(json!({"jsonrpc":"2.0","id":6,"method":"bogus/method"}))
+            .await
+            .unwrap();
         assert_eq!(r["error"]["code"], -32601);
 
-        let r = s.handle(json!({"jsonrpc":"2.0","id":7,"method":"ping"})).await.unwrap();
+        let r = s
+            .handle(json!({"jsonrpc":"2.0","id":7,"method":"ping"}))
+            .await
+            .unwrap();
         assert_eq!(r["result"], json!({}));
-        let r = s.handle(json!({"jsonrpc":"2.0","id":8,"method":"resources/list"})).await.unwrap();
+        let r = s
+            .handle(json!({"jsonrpc":"2.0","id":8,"method":"resources/list"}))
+            .await
+            .unwrap();
         assert_eq!(r["result"]["resources"], json!([]));
-        let r = s.handle(json!({"jsonrpc":"2.0","id":9,"method":"prompts/list"})).await.unwrap();
+        let r = s
+            .handle(json!({"jsonrpc":"2.0","id":9,"method":"prompts/list"}))
+            .await
+            .unwrap();
         assert_eq!(r["result"]["prompts"], json!([]));
     }
 
     #[tokio::test]
     async fn notifications_and_batches() {
         let s = srv();
-        assert!(s.handle(json!({"jsonrpc":"2.0","method":"notifications/initialized"})).await.is_none());
+        assert!(
+            s.handle(json!({"jsonrpc":"2.0","method":"notifications/initialized"}))
+                .await
+                .is_none()
+        );
         let r = s
             .handle(json!([
                 {"jsonrpc":"2.0","id":1,"method":"ping"},
@@ -701,7 +826,11 @@ mod tests {
         assert_eq!(arr.len(), 2);
         assert_eq!(arr[0]["id"], 1);
         assert_eq!(arr[1]["error"]["code"], -32601);
-        assert!(s.handle(json!([{"jsonrpc":"2.0","method":"notifications/initialized"}])).await.is_none());
+        assert!(
+            s.handle(json!([{"jsonrpc":"2.0","method":"notifications/initialized"}]))
+                .await
+                .is_none()
+        );
         let r = s.handle(json!([])).await.unwrap();
         assert_eq!(r["error"]["code"], jsonrpc::INVALID_REQUEST);
         let r = s.handle(json!(42)).await.unwrap();
@@ -725,7 +854,13 @@ mod tests {
     }
 
     fn start(token: Option<&str>) -> HttpServerHandle {
-        spawn_http_server(&tokio::runtime::Handle::current(), Arc::new(Dummy), 0, token.map(String::from)).unwrap()
+        spawn_http_server(
+            &tokio::runtime::Handle::current(),
+            Arc::new(Dummy),
+            0,
+            token.map(String::from),
+        )
+        .unwrap()
     }
 
     #[tokio::test]
@@ -739,15 +874,41 @@ mod tests {
         let r = c.post(&h.url).json(&init).send().await.unwrap();
         assert_eq!(r.status(), 401);
         // wrong auth
-        let r = c.post(&h.url).bearer_auth("nope").json(&init).send().await.unwrap();
+        let r = c
+            .post(&h.url)
+            .bearer_auth("nope")
+            .json(&init)
+            .send()
+            .await
+            .unwrap();
         assert_eq!(r.status(), 401);
         // bad origin
-        let r = c.post(&h.url).bearer_auth(&h.token).header("Origin", "https://evil.example").json(&init).send().await.unwrap();
+        let r = c
+            .post(&h.url)
+            .bearer_auth(&h.token)
+            .header("Origin", "https://evil.example")
+            .json(&init)
+            .send()
+            .await
+            .unwrap();
         assert_eq!(r.status(), 403);
         // good origin
-        let r = c.post(&h.url).bearer_auth(&h.token).header("Origin", "http://localhost:1234").json(&init).send().await.unwrap();
+        let r = c
+            .post(&h.url)
+            .bearer_auth(&h.token)
+            .header("Origin", "http://localhost:1234")
+            .json(&init)
+            .send()
+            .await
+            .unwrap();
         assert_eq!(r.status(), 200);
-        let sid = r.headers().get("mcp-session-id").expect("session id").to_str().unwrap().to_string();
+        let sid = r
+            .headers()
+            .get("mcp-session-id")
+            .expect("session id")
+            .to_str()
+            .unwrap()
+            .to_string();
         let v: Value = r.json().await.unwrap();
         assert_eq!(v["result"]["serverInfo"]["name"], "FerroSurf");
 
@@ -774,18 +935,54 @@ mod tests {
         assert_eq!(v["result"]["content"][0]["text"], "echo:yo");
 
         // malformed JSON
-        let r = c.post(&h.url).bearer_auth(&h.token).body("{nope").send().await.unwrap();
+        let r = c
+            .post(&h.url)
+            .bearer_auth(&h.token)
+            .body("{nope")
+            .send()
+            .await
+            .unwrap();
         assert_eq!(r.status(), 400);
 
         // GET => 405, DELETE => 200
-        assert_eq!(c.get(&h.url).bearer_auth(&h.token).send().await.unwrap().status(), 405);
-        assert_eq!(c.delete(&h.url).bearer_auth(&h.token).send().await.unwrap().status(), 200);
+        assert_eq!(
+            c.get(&h.url)
+                .bearer_auth(&h.token)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            405
+        );
+        assert_eq!(
+            c.delete(&h.url)
+                .bearer_auth(&h.token)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            200
+        );
 
         // discovery without auth
         let base = h.url.trim_end_matches("/mcp");
-        let v: Value = c.get(format!("{base}{DISCOVERY_PATH}")).send().await.unwrap().json().await.unwrap();
+        let v: Value = c
+            .get(format!("{base}{DISCOVERY_PATH}"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
         assert_eq!(v, json!({"name":"FerroSurf"}));
-        assert_eq!(c.get(format!("{base}/other")).send().await.unwrap().status(), 404);
+        assert_eq!(
+            c.get(format!("{base}/other"))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            404
+        );
 
         h.shutdown();
     }
@@ -795,7 +992,13 @@ mod tests {
         let a = start(Some("secret-token"));
         assert_eq!(a.token, "secret-token");
         // Ask for the busy port: must fall back instead of failing.
-        let b = spawn_http_server(&tokio::runtime::Handle::current(), Arc::new(Dummy), a.port, None).unwrap();
+        let b = spawn_http_server(
+            &tokio::runtime::Handle::current(),
+            Arc::new(Dummy),
+            a.port,
+            None,
+        )
+        .unwrap();
         assert_ne!(b.port, a.port);
         assert_eq!(b.token.len(), 64);
     }
@@ -804,17 +1007,30 @@ mod tests {
     async fn stdio_bridge_in_memory() {
         let h = start(None);
         let input = concat!(
-            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}"#, "\n",
-            r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#, "\n",
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}"#,
             "\n",
-            r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"echo","arguments":{"text":"bridge"}}}"#, "\n",
+            r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+            "\n",
+            "\n",
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"echo","arguments":{"text":"bridge"}}}"#,
+            "\n",
             "not json\n",
         );
         let (mut out_r, out_w) = tokio::io::duplex(64 * 1024);
-        bridge_streams(tokio::io::BufReader::new(input.as_bytes()), out_w, &h.url, &h.token).await.unwrap();
+        bridge_streams(
+            tokio::io::BufReader::new(input.as_bytes()),
+            out_w,
+            &h.url,
+            &h.token,
+        )
+        .await
+        .unwrap();
         let mut s = String::new();
         out_r.read_to_string(&mut s).await.unwrap();
-        let lines: Vec<Value> = s.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+        let lines: Vec<Value> = s
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
         assert_eq!(lines.len(), 3, "got {s}");
         assert_eq!(lines[0]["id"], 1);
         assert_eq!(lines[1]["result"]["content"][0]["text"], "echo:bridge");
@@ -826,7 +1042,14 @@ mod tests {
         let input = "{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"ping\"}\n";
         let (mut out_r, out_w) = tokio::io::duplex(4096);
         // Port 1 on loopback: connection refused.
-        bridge_streams(tokio::io::BufReader::new(input.as_bytes()), out_w, "http://127.0.0.1:1/mcp", "t").await.unwrap();
+        bridge_streams(
+            tokio::io::BufReader::new(input.as_bytes()),
+            out_w,
+            "http://127.0.0.1:1/mcp",
+            "t",
+        )
+        .await
+        .unwrap();
         let mut s = String::new();
         out_r.read_to_string(&mut s).await.unwrap();
         let v: Value = serde_json::from_str(s.trim()).unwrap();
@@ -838,7 +1061,11 @@ mod tests {
     fn endpoint_file_roundtrip() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("nested/endpoint.json");
-        let e = EndpointFile { url: "http://127.0.0.1:1/mcp".into(), token: "t".into(), pid: 42 };
+        let e = EndpointFile {
+            url: "http://127.0.0.1:1/mcp".into(),
+            token: "t".into(),
+            pid: 42,
+        };
         e.write(&p).unwrap();
         assert_eq!(EndpointFile::read(&p).unwrap(), e);
         assert!(EndpointFile::read(&dir.path().join("missing")).is_err());

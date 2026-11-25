@@ -64,14 +64,20 @@ impl History {
         let conn = Connection::open(path)?;
         conn.execute_batch(SCHEMA)?;
         conn.execute_batch("PRAGMA foreign_keys = ON;")?;
-        Ok(Self { conn, enabled: true })
+        Ok(Self {
+            conn,
+            enabled: true,
+        })
     }
 
     pub fn in_memory() -> anyhow::Result<Self> {
         let conn = Connection::open_in_memory()?;
         conn.execute_batch(SCHEMA)?;
         conn.execute_batch("PRAGMA foreign_keys = ON;")?;
-        Ok(Self { conn, enabled: true })
+        Ok(Self {
+            conn,
+            enabled: true,
+        })
     }
 
     /// When disabled (e.g. private/guest profile), visits are silently dropped.
@@ -83,7 +89,13 @@ impl History {
         self.record_visit_at(url, title, typed, crate::now_ms())
     }
 
-    pub fn record_visit_at(&self, url: &str, title: &str, typed: bool, when_ms: i64) -> anyhow::Result<()> {
+    pub fn record_visit_at(
+        &self,
+        url: &str,
+        title: &str,
+        typed: bool,
+        when_ms: i64,
+    ) -> anyhow::Result<()> {
         if !self.enabled || !is_recordable(url) {
             return Ok(());
         }
@@ -96,9 +108,13 @@ impl History {
                title = CASE WHEN ?2 = '' THEN title ELSE ?2 END",
             params![url, title, typed as i64, when_ms],
         )?;
-        let id: i64 = self.conn.query_row("SELECT id FROM urls WHERE url = ?1", [url], |r| r.get(0))?;
-        self.conn
-            .execute("INSERT INTO visits (url_id, visit_ms) VALUES (?1, ?2)", params![id, when_ms])?;
+        let id: i64 = self
+            .conn
+            .query_row("SELECT id FROM urls WHERE url = ?1", [url], |r| r.get(0))?;
+        self.conn.execute(
+            "INSERT INTO visits (url_id, visit_ms) VALUES (?1, ?2)",
+            params![id, when_ms],
+        )?;
         Ok(())
     }
 
@@ -124,9 +140,13 @@ impl History {
                title = CASE WHEN title = '' THEN ?2 ELSE title END",
             params![url, title, visit_count.max(1), typed_count.max(0), last_visit_ms],
         )?;
-        let id: i64 = self.conn.query_row("SELECT id FROM urls WHERE url = ?1", [url], |r| r.get(0))?;
-        self.conn
-            .execute("INSERT INTO visits (url_id, visit_ms) VALUES (?1, ?2)", params![id, last_visit_ms])?;
+        let id: i64 = self
+            .conn
+            .query_row("SELECT id FROM urls WHERE url = ?1", [url], |r| r.get(0))?;
+        self.conn.execute(
+            "INSERT INTO visits (url_id, visit_ms) VALUES (?1, ?2)",
+            params![id, last_visit_ms],
+        )?;
         Ok(())
     }
 
@@ -134,8 +154,10 @@ impl History {
         if !self.enabled || title.is_empty() {
             return Ok(());
         }
-        self.conn
-            .execute("UPDATE urls SET title = ?2 WHERE url = ?1", params![url, title])?;
+        self.conn.execute(
+            "UPDATE urls SET title = ?2 WHERE url = ?1",
+            params![url, title],
+        )?;
         Ok(())
     }
 
@@ -155,7 +177,14 @@ impl History {
     pub fn suggest(&self, query: &str, limit: usize) -> anyhow::Result<Vec<(u32, HistoryEntry)>> {
         let words: Vec<String> = query
             .split_whitespace()
-            .map(|w| format!("%{}%", w.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")))
+            .map(|w| {
+                format!(
+                    "%{}%",
+                    w.replace('\\', "\\\\")
+                        .replace('%', "\\%")
+                        .replace('_', "\\_")
+                )
+            })
             .collect();
         if words.is_empty() {
             return Ok(Vec::new());
@@ -209,7 +238,12 @@ impl History {
     }
 
     /// Visits in reverse-chronological order, optionally filtered by text.
-    pub fn visits(&self, filter: &str, before_ms: Option<i64>, limit: usize) -> anyhow::Result<Vec<Visit>> {
+    pub fn visits(
+        &self,
+        filter: &str,
+        before_ms: Option<i64>,
+        limit: usize,
+    ) -> anyhow::Result<Vec<Visit>> {
         let like = format!("%{}%", filter.trim());
         let mut stmt = self.conn.prepare(
             "SELECT u.url, u.title, v.visit_ms FROM visits v JOIN urls u ON u.id = v.url_id
@@ -218,20 +252,29 @@ impl History {
         )?;
         let rows = stmt.query_map(
             params![before_ms.unwrap_or(i64::MAX), like, limit as i64],
-            |r| Ok(Visit { url: r.get(0)?, title: r.get(1)?, visit_ms: r.get(2)? }),
+            |r| {
+                Ok(Visit {
+                    url: r.get(0)?,
+                    title: r.get(1)?,
+                    visit_ms: r.get(2)?,
+                })
+            },
         )?;
         Ok(rows.filter_map(Result::ok).collect())
     }
 
     pub fn delete_url(&self, url: &str) -> anyhow::Result<()> {
-        self.conn.execute("DELETE FROM urls WHERE url = ?1", [url])?;
+        self.conn
+            .execute("DELETE FROM urls WHERE url = ?1", [url])?;
         Ok(())
     }
 
     /// Delete visits in `[from_ms, to_ms)` and prune URLs without visits.
     pub fn delete_range(&self, from_ms: i64, to_ms: i64) -> anyhow::Result<()> {
-        self.conn
-            .execute("DELETE FROM visits WHERE visit_ms >= ?1 AND visit_ms < ?2", params![from_ms, to_ms])?;
+        self.conn.execute(
+            "DELETE FROM visits WHERE visit_ms >= ?1 AND visit_ms < ?2",
+            params![from_ms, to_ms],
+        )?;
         self.conn.execute(
             "DELETE FROM urls WHERE id NOT IN (SELECT DISTINCT url_id FROM visits)",
             [],
@@ -240,12 +283,15 @@ impl History {
     }
 
     pub fn clear(&self) -> anyhow::Result<()> {
-        self.conn.execute_batch("DELETE FROM visits; DELETE FROM urls;")?;
+        self.conn
+            .execute_batch("DELETE FROM visits; DELETE FROM urls;")?;
         Ok(())
     }
 
     pub fn count(&self) -> anyhow::Result<i64> {
-        Ok(self.conn.query_row("SELECT COUNT(*) FROM urls", [], |r| r.get(0))?)
+        Ok(self
+            .conn
+            .query_row("SELECT COUNT(*) FROM urls", [], |r| r.get(0))?)
     }
 }
 
@@ -293,13 +339,18 @@ mod tests {
         let h = History::in_memory().unwrap();
         h.record_visit("https://servo.org/", "Servo", true).unwrap();
         h.record_visit("https://servo.org/", "", false).unwrap();
-        h.record_visit("https://servo.org/blog/2025/", "Servo blog", false).unwrap();
-        h.record_visit("https://rust-lang.org/", "Rust", false).unwrap();
+        h.record_visit("https://servo.org/blog/2025/", "Servo blog", false)
+            .unwrap();
+        h.record_visit("https://rust-lang.org/", "Rust", false)
+            .unwrap();
         h.record_visit("about:blank", "", false).unwrap();
         h.record_visit("ferro://newtab", "", false).unwrap();
         assert_eq!(h.count().unwrap(), 3);
         let e = h.get("https://servo.org/").unwrap().unwrap();
-        assert_eq!((e.visit_count, e.typed_count, e.title.as_str()), (2, 1, "Servo"));
+        assert_eq!(
+            (e.visit_count, e.typed_count, e.title.as_str()),
+            (2, 1, "Servo")
+        );
         let s = h.suggest("serv", 10).unwrap();
         assert_eq!(s.len(), 2);
         assert_eq!(s[0].1.url, "https://servo.org/");
@@ -312,8 +363,10 @@ mod tests {
     #[test]
     fn deletion() {
         let h = History::in_memory().unwrap();
-        h.record_visit_at("https://a.com/", "A", false, 1000).unwrap();
-        h.record_visit_at("https://b.com/", "B", false, 5000).unwrap();
+        h.record_visit_at("https://a.com/", "A", false, 1000)
+            .unwrap();
+        h.record_visit_at("https://b.com/", "B", false, 5000)
+            .unwrap();
         h.delete_range(0, 2000).unwrap();
         assert!(h.get("https://a.com/").unwrap().is_none());
         assert!(h.get("https://b.com/").unwrap().is_some());

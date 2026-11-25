@@ -37,7 +37,7 @@ pub fn read_json<T: DeserializeOwned>(path: &Path) -> anyhow::Result<Option<T>> 
             log::error!("Corrupt file {}: {err}; moving it aside", path.display());
             let _ = fs::rename(path, path.with_extension("json.corrupt"));
             Ok(None)
-        },
+        }
     }
 }
 
@@ -49,7 +49,7 @@ pub fn read_json_or_default<T: DeserializeOwned + Default>(path: &Path) -> T {
         Err(e) => {
             log::error!("Failed to read {}: {e}", path.display());
             T::default()
-        },
+        }
     }
 }
 

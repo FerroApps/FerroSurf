@@ -7,11 +7,13 @@ use std::collections::VecDeque;
 
 use servo::{
     AllowOrDenyRequest, AuthenticationRequest, ConsoleLogLevel, CreateNewWebViewRequest, Cursor,
-    EmbedderControl, EmbedderControlId, LoadStatus, NavigationRequest, Notification, PermissionRequest,
-    ServoDelegate, ServoError, TraversalId, WebResourceLoad, WebView, WebViewDelegate,
+    EmbedderControl, EmbedderControlId, LoadStatus, NavigationRequest, Notification,
+    PermissionRequest, ServoDelegate, ServoError, TraversalId, WebResourceLoad, WebView,
+    WebViewDelegate,
 };
 use url::Url;
 
+#[allow(dead_code)] // payloads kept for completeness of the event model
 pub enum EngineEvent {
     NewFrame(WebView),
     UrlChanged(WebView, Url),
@@ -52,10 +54,6 @@ impl Delegate {
 
     pub fn drain(&self) -> Vec<EngineEvent> {
         self.queue.borrow_mut().drain(..).collect()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.queue.borrow().is_empty()
     }
 }
 

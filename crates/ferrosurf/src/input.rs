@@ -1,11 +1,11 @@
 //! Translation of winit input into Servo input events.
 
+use servo::DevicePoint;
 use servo::{
     Code, Cursor, InputEvent, Key, KeyState, KeyboardEvent, Location, Modifiers, MouseButton,
     MouseButtonAction, MouseButtonEvent, MouseMoveEvent, NamedKey, WebViewPoint, WheelDelta,
     WheelEvent, WheelMode,
 };
-use servo::{DevicePoint};
 use winit::event::{ElementState, KeyEvent, MouseScrollDelta};
 use winit::keyboard::{Key as WKey, KeyLocation, ModifiersState, PhysicalKey};
 use winit::window::CursorIcon;
@@ -39,7 +39,9 @@ pub fn keyboard_event(event: &KeyEvent, mods: ModifiersState) -> KeyboardEvent {
         _ => Key::Named(NamedKey::Unidentified),
     };
     let code = match event.physical_key {
-        PhysicalKey::Code(c) => format!("{c:?}").parse::<Code>().unwrap_or(Code::Unidentified),
+        PhysicalKey::Code(c) => format!("{c:?}")
+            .parse::<Code>()
+            .unwrap_or(Code::Unidentified),
         PhysicalKey::Unidentified(_) => Code::Unidentified,
     };
     let location = match event.location {
@@ -79,20 +81,31 @@ pub fn mouse_move(x: f32, y: f32) -> InputEvent {
 }
 
 pub fn mouse_button_event(pressed: bool, button: MouseButton, x: f32, y: f32) -> InputEvent {
-    let action = if pressed { MouseButtonAction::Down } else { MouseButtonAction::Up };
+    let action = if pressed {
+        MouseButtonAction::Down
+    } else {
+        MouseButtonAction::Up
+    };
     InputEvent::MouseButton(MouseButtonEvent::new(action, button, point(x, y)))
 }
 
 pub fn wheel(delta: MouseScrollDelta, x: f32, y: f32) -> InputEvent {
     let (dx, dy, mode) = match delta {
-        MouseScrollDelta::LineDelta(dx, dy) => {
-            (dx as f64 * LINE_HEIGHT, dy as f64 * LINE_HEIGHT, WheelMode::DeltaPixel)
-        },
+        MouseScrollDelta::LineDelta(dx, dy) => (
+            dx as f64 * LINE_HEIGHT,
+            dy as f64 * LINE_HEIGHT,
+            WheelMode::DeltaPixel,
+        ),
         MouseScrollDelta::PixelDelta(d) => (d.x, d.y, WheelMode::DeltaPixel),
     };
     // Servo expects DOM-style deltas: positive = scroll down/right.
     InputEvent::Wheel(WheelEvent::new(
-        WheelDelta { x: -dx, y: -dy, z: 0.0, mode },
+        WheelDelta {
+            x: -dx,
+            y: -dy,
+            z: 0.0,
+            mode,
+        },
         point(x, y),
     ))
 }

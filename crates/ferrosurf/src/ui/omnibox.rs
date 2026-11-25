@@ -66,41 +66,88 @@ pub fn omnibox(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &mut Vec
     let (url_display, secure, bookmarked, zoom, url_string) = match w.active_tab() {
         Some(t) => {
             let u = t.url_string();
-            (t.omnibox_display(), t.is_secure(), env.profile.bookmarks.is_bookmarked(&u), t.zoom, u)
-        },
+            (
+                t.omnibox_display(),
+                t.is_secure(),
+                env.profile.bookmarks.is_bookmarked(&u),
+                t.zoom,
+                u,
+            )
+        }
         None => (String::new(), None, false, 1.0, String::new()),
     };
     let height = ui.spacing().interact_size.y.max(30.0);
     let width = ui.available_width();
     let (outer, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
     let focused = ui.memory(|m| m.has_focus(field_id()));
-    let fill = if focused { if pal.dark { Color32::from_rgb(0x16, 0x18, 0x1d) } else { Color32::WHITE } } else { pal.field };
-    let stroke = if focused { Stroke::new(1.5, pal.accent) } else { Stroke::NONE };
-    ui.painter().rect(outer, height / 2.0, fill, stroke, egui::StrokeKind::Inside);
+    let fill = if focused {
+        if pal.dark {
+            Color32::from_rgb(0x16, 0x18, 0x1d)
+        } else {
+            Color32::WHITE
+        }
+    } else {
+        pal.field
+    };
+    let stroke = if focused {
+        Stroke::new(1.5, pal.accent)
+    } else {
+        Stroke::NONE
+    };
+    ui.painter()
+        .rect(outer, height / 2.0, fill, stroke, egui::StrokeKind::Inside);
     w.chrome.omnibox.field_rect = FieldRect(outer);
 
-    let mut inner = ui.new_child(egui::UiBuilder::new().max_rect(outer.shrink2(Vec2::new(10.0, 0.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
+    let mut inner = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(outer.shrink2(Vec2::new(10.0, 0.0)))
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
     // Security indicator.
     let (glyph, color, tip) = match secure {
-        Some(true) if url_string.starts_with("ferro:") => (icon::FLAME, pal.accent, "Página de FerroSurf"),
+        Some(true) if url_string.starts_with("ferro:") => {
+            (icon::FLAME, pal.accent, "Página de FerroSurf")
+        }
         Some(true) => (icon::LOCK_SIMPLE, pal.text_dim, "Conexión segura"),
         Some(false) => (icon::WARNING_CIRCLE, pal.danger, "Conexión no segura"),
         None => (icon::MAGNIFYING_GLASS, pal.text_dim, ""),
     };
-    let glyph = if focused { icon::MAGNIFYING_GLASS } else { glyph };
-    inner.label(RichText::new(glyph).color(color).size(15.0)).on_hover_text(tip);
+    let glyph = if focused {
+        icon::MAGNIFYING_GLASS
+    } else {
+        glyph
+    };
+    inner
+        .label(RichText::new(glyph).color(color).size(15.0))
+        .on_hover_text(tip);
 
     // Right side controls inside the field.
-    let right_w = if (zoom - 1.0).abs() > 0.01 { 92.0 } else { 34.0 };
+    let right_w = if (zoom - 1.0).abs() > 0.01 {
+        92.0
+    } else {
+        34.0
+    };
     let edit_w = (inner.available_width() - right_w).max(40.0);
 
-    let mut text = w.chrome.omnibox.editing.clone().unwrap_or_else(|| url_display.clone());
-    let display_text = if focused { text.clone() } else { prettify_for_display(&text) };
+    let mut text = w
+        .chrome
+        .omnibox
+        .editing
+        .clone()
+        .unwrap_or_else(|| url_display.clone());
+    let display_text = if focused {
+        text.clone()
+    } else {
+        prettify_for_display(&text)
+    };
     let mut buffer = if focused { text.clone() } else { display_text };
     let edit = egui::TextEdit::singleline(&mut buffer)
         .id(field_id())
         .frame(egui::Frame::NONE)
-        .hint_text(format!("Busca con {} o escribe una dirección", env.profile.settings.current_search_engine().name))
+        .hint_text(format!(
+            "Busca con {} o escribe una dirección",
+            env.profile.settings.current_search_engine().name
+        ))
         .desired_width(edit_w)
         .margin(egui::Margin::symmetric(4, 0))
         .font(egui::TextStyle::Body);
@@ -118,10 +165,13 @@ pub fn omnibox(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &mut Vec
     if resp.gained_focus() || (w.chrome.select_all_omnibox && resp.has_focus()) {
         w.chrome.select_all_omnibox = false;
         let len = buffer.chars().count();
-        output.state.cursor.set_char_range(Some(egui::text::CCursorRange::two(
-            egui::text::CCursor::new(0),
-            egui::text::CCursor::new(len),
-        )));
+        output
+            .state
+            .cursor
+            .set_char_range(Some(egui::text::CCursorRange::two(
+                egui::text::CCursor::new(0),
+                egui::text::CCursor::new(len),
+            )));
         output.state.store(ui.ctx(), field_id());
         if w.chrome.omnibox.editing.is_none() {
             w.chrome.omnibox.editing = Some(url_display.clone());
@@ -154,9 +204,17 @@ pub fn omnibox(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &mut Vec
     let enter = lost && ui.input(|i| i.key_pressed(egui::Key::Enter));
     if enter {
         let mods = ui.input(|i| i.modifiers);
-        let disposition = if mods.alt { Disposition::NewForegroundTab } else { Disposition::CurrentTab };
+        let disposition = if mods.alt {
+            Disposition::NewForegroundTab
+        } else {
+            Disposition::CurrentTab
+        };
         let chosen = if w.chrome.omnibox.is_open() {
-            w.chrome.omnibox.suggestions.get(w.chrome.omnibox.selected).cloned()
+            w.chrome
+                .omnibox
+                .suggestions
+                .get(w.chrome.omnibox.selected)
+                .cloned()
         } else {
             None
         };
@@ -166,11 +224,11 @@ pub fn omnibox(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &mut Vec
                     cmds.push(Cmd::ActivateTab(id));
                 }
                 None
-            },
+            }
             Some(s) if s.kind == SuggestionKind::Command => {
                 run_command(&s.url, cmds);
                 None
-            },
+            }
             Some(s) if s.kind != SuggestionKind::WhatYouTyped => Some(s.url),
             _ => {
                 // Ctrl+Enter: www.<text>.com
@@ -181,7 +239,7 @@ pub fn omnibox(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &mut Vec
                 } else {
                     Some(text.clone())
                 }
-            },
+            }
         };
         if let Some(input) = input.filter(|s| !s.trim().is_empty()) {
             cmds.push(Cmd::Navigate { input, disposition });
@@ -190,7 +248,9 @@ pub fn omnibox(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &mut Vec
     } else if lost {
         // Clicking a suggestion is handled by the dropdown before focus is lost.
         let pointer_on_dropdown = ui.ctx().pointer_latest_pos().is_some_and(|p| {
-            ui.ctx().layer_id_at(p).is_some_and(|l| l.id == Id::new("omnibox-dropdown"))
+            ui.ctx()
+                .layer_id_at(p)
+                .is_some_and(|l| l.id == Id::new("omnibox-dropdown"))
         });
         if !pointer_on_dropdown {
             w.chrome.omnibox.close();
@@ -201,12 +261,26 @@ pub fn omnibox(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &mut Vec
     inner.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
         let star = if bookmarked { icon::STAR } else { icon::STAR };
-        let star_resp = ui.add(egui::Button::new(RichText::new(star).size(16.0).color(if bookmarked { pal.accent } else { pal.text_dim })).frame(false));
-        if star_resp.on_hover_text("Añadir esta página a marcadores (Ctrl+D)").clicked() {
+        let star_resp = ui.add(
+            egui::Button::new(RichText::new(star).size(16.0).color(if bookmarked {
+                pal.accent
+            } else {
+                pal.text_dim
+            }))
+            .frame(false),
+        );
+        if star_resp
+            .on_hover_text("Añadir esta página a marcadores (Ctrl+D)")
+            .clicked()
+        {
             cmds.push(Cmd::Action(Action::BookmarkPage));
         }
         if (zoom - 1.0).abs() > 0.01 {
-            let z = ui.add(egui::Button::new(RichText::new(format!("{:.0}%", zoom * 100.0)).small()).corner_radius(10).fill(pal.tab_hover));
+            let z = ui.add(
+                egui::Button::new(RichText::new(format!("{:.0}%", zoom * 100.0)).small())
+                    .corner_radius(10)
+                    .fill(pal.tab_hover),
+            );
             if z.on_hover_text("Restablecer zoom").clicked() {
                 cmds.push(Cmd::Action(Action::ZoomReset));
             }
@@ -220,7 +294,10 @@ pub fn omnibox(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &mut Vec
 fn prettify_for_display(url: &str) -> String {
     if url.starts_with("https://") {
         let s = &url["https://".len()..];
-        s.strip_suffix('/').filter(|r| !r.contains('/')).unwrap_or(s).to_string()
+        s.strip_suffix('/')
+            .filter(|r| !r.contains('/'))
+            .unwrap_or(s)
+            .to_string()
     } else {
         url.to_string()
     }
@@ -256,7 +333,9 @@ fn update_suggestions(w: &mut BrowserWindow, env: &mut Env) {
     if env.profile.settings.privacy.search_suggestions
         && !env.profile.profile.ephemeral
         && st.fetched_for != q
-        && st.last_keystroke.is_some_and(|t| t.elapsed() > Duration::from_millis(150))
+        && st
+            .last_keystroke
+            .is_some_and(|t| t.elapsed() > Duration::from_millis(150))
         && !q.contains("://")
     {
         st.fetched_for = q.clone();
@@ -272,7 +351,8 @@ fn update_suggestions(w: &mut BrowserWindow, env: &mut Env) {
                     .into();
                 if let Ok(mut resp) = agent.get(url.as_str()).call() {
                     if let Ok(body) = resp.body_mut().read_to_string() {
-                        *slot.lock() = Some((query, ferrosurf_core::search::parse_suggestions(&body)));
+                        *slot.lock() =
+                            Some((query, ferrosurf_core::search::parse_suggestions(&body)));
                         if let Some(wake) = wake {
                             wake();
                         }
@@ -292,12 +372,23 @@ fn update_suggestions(w: &mut BrowserWindow, env: &mut Env) {
     if let Some(interp) = ferrosurf_core::omnibox::interpret(&q, &engine, &engines) {
         let (title, url) = match &interp {
             ferrosurf_core::omnibox::Interpretation::Navigate(u) => (u.to_string(), q.clone()),
-            ferrosurf_core::omnibox::Interpretation::Search { engine_id, terms, .. } => {
-                let name = engines.iter().find(|e| &e.id == engine_id).map(|e| e.name.clone()).unwrap_or_default();
+            ferrosurf_core::omnibox::Interpretation::Search {
+                engine_id, terms, ..
+            } => {
+                let name = engines
+                    .iter()
+                    .find(|e| &e.id == engine_id)
+                    .map(|e| e.name.clone())
+                    .unwrap_or_default();
                 (format!("{terms} — buscar con {name}"), q.clone())
-            },
+            }
         };
-        out.push(Suggestion { kind: SuggestionKind::WhatYouTyped, title, url, score: 10_000 });
+        out.push(Suggestion {
+            kind: SuggestionKind::WhatYouTyped,
+            title,
+            url,
+            score: 10_000,
+        });
     }
     // Commands starting with ">".
     if let Some(c) = q.strip_prefix('>') {
@@ -310,8 +401,15 @@ fn update_suggestions(w: &mut BrowserWindow, env: &mut Env) {
             ("cmd:assistant", "Asistente IA"),
             ("cmd:palette", "Paleta de comandos"),
         ] {
-            if let Some(s) = ferrosurf_core::util::match_score(c.trim(), label).or(c.trim().is_empty().then_some(1)) {
-                out.push(Suggestion { kind: SuggestionKind::Command, title: label.into(), url: id.into(), score: 5000 + s });
+            if let Some(s) = ferrosurf_core::util::match_score(c.trim(), label)
+                .or(c.trim().is_empty().then_some(1))
+            {
+                out.push(Suggestion {
+                    kind: SuggestionKind::Command,
+                    title: label.into(),
+                    url: id.into(),
+                    score: 5000 + s,
+                });
             }
         }
     }
@@ -319,15 +417,30 @@ fn update_suggestions(w: &mut BrowserWindow, env: &mut Env) {
     for t in &w.tabs {
         let hay = format!("{} {}", t.title, t.url_string());
         if let Some(s) = ferrosurf_core::util::match_score(&q, &hay) {
-            out.push(Suggestion { kind: SuggestionKind::OpenTab, title: t.display_title(), url: format!("tab:{}", t.id), score: 300 + s });
+            out.push(Suggestion {
+                kind: SuggestionKind::OpenTab,
+                title: t.display_title(),
+                url: format!("tab:{}", t.id),
+                score: 300 + s,
+            });
         }
     }
     for (s, b) in env.profile.bookmarks.search(&q, 4) {
-        out.push(Suggestion { kind: SuggestionKind::Bookmark, title: b.title.clone(), url: b.url.clone(), score: 400 + s });
+        out.push(Suggestion {
+            kind: SuggestionKind::Bookmark,
+            title: b.title.clone(),
+            url: b.url.clone(),
+            score: 400 + s,
+        });
     }
     if let Ok(hits) = env.profile.history.suggest(&q, 6) {
         for (s, e) in hits {
-            out.push(Suggestion { kind: SuggestionKind::History, title: e.title.clone(), url: e.url.clone(), score: 200 + s });
+            out.push(Suggestion {
+                kind: SuggestionKind::History,
+                title: e.title.clone(),
+                url: e.url.clone(),
+                score: 200 + s,
+            });
         }
     }
     // Inline completion from the best history/bookmark host.
@@ -336,11 +449,17 @@ fn update_suggestions(w: &mut BrowserWindow, env: &mut Env) {
         .filter(|s| matches!(s.kind, SuggestionKind::History | SuggestionKind::Bookmark))
         .map(|s| s.url.clone())
         .collect();
-    st.inline_completion = ferrosurf_core::omnibox::inline_completion(&q, candidates.iter().map(String::as_str));
+    st.inline_completion =
+        ferrosurf_core::omnibox::inline_completion(&q, candidates.iter().map(String::as_str));
     if st.remote_results.0 == q || q.starts_with(&st.remote_results.0) {
         for (i, s) in st.remote_results.1.iter().take(4).enumerate() {
             if s != &q {
-                out.push(Suggestion { kind: SuggestionKind::SearchSuggestion, title: s.clone(), url: s.clone(), score: 100 - i as u32 });
+                out.push(Suggestion {
+                    kind: SuggestionKind::SearchSuggestion,
+                    title: s.clone(),
+                    url: s.clone(),
+                    score: 100 - i as u32,
+                });
             }
         }
     }
@@ -370,12 +489,25 @@ pub fn dropdown(ctx: &egui::Context, w: &mut BrowserWindow, env: &mut Env, cmds:
                     ui.set_width(field.width() - 12.0);
                     for (i, s) in w.chrome.omnibox.suggestions.iter().enumerate() {
                         let selected = i == w.chrome.omnibox.selected;
-                        let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 32.0), Sense::click());
+                        let (rect, resp) = ui.allocate_exact_size(
+                            Vec2::new(ui.available_width(), 32.0),
+                            Sense::click(),
+                        );
                         if selected || resp.hovered() {
-                            ui.painter().rect_filled(rect, 8.0, if selected { pal.accent.gamma_multiply(0.22) } else { pal.tab_hover });
+                            ui.painter().rect_filled(
+                                rect,
+                                8.0,
+                                if selected {
+                                    pal.accent.gamma_multiply(0.22)
+                                } else {
+                                    pal.tab_hover
+                                },
+                            );
                         }
                         let glyph = match s.kind {
-                            SuggestionKind::WhatYouTyped if s.title.contains(" — buscar con ") => icon::MAGNIFYING_GLASS,
+                            SuggestionKind::WhatYouTyped if s.title.contains(" — buscar con ") => {
+                                icon::MAGNIFYING_GLASS
+                            }
                             SuggestionKind::WhatYouTyped => icon::GLOBE_SIMPLE,
                             SuggestionKind::OpenTab => icon::SQUARES_FOUR,
                             SuggestionKind::Bookmark => icon::STAR,
@@ -384,15 +516,35 @@ pub fn dropdown(ctx: &egui::Context, w: &mut BrowserWindow, env: &mut Env, cmds:
                             SuggestionKind::Command => icon::COMMAND,
                         };
                         let p = ui.painter();
-                        p.text(rect.left_center() + Vec2::new(16.0, 0.0), egui::Align2::CENTER_CENTER, glyph, egui::FontId::proportional(15.0), pal.text_dim);
-                        let title = if s.title.is_empty() { ferrosurf_core::util::pretty_url(&s.url) } else { s.title.clone() };
-                        let title_g = p.layout_no_wrap(title, egui::FontId::proportional(13.0), pal.text);
+                        p.text(
+                            rect.left_center() + Vec2::new(16.0, 0.0),
+                            egui::Align2::CENTER_CENTER,
+                            glyph,
+                            egui::FontId::proportional(15.0),
+                            pal.text_dim,
+                        );
+                        let title = if s.title.is_empty() {
+                            ferrosurf_core::util::pretty_url(&s.url)
+                        } else {
+                            s.title.clone()
+                        };
+                        let title_g =
+                            p.layout_no_wrap(title, egui::FontId::proportional(13.0), pal.text);
                         let tw = title_g.size().x.min(rect.width() * 0.6);
-                        let text_rect = Rect::from_min_max(rect.left_top() + Vec2::new(34.0, 0.0), rect.right_bottom() - Vec2::new(8.0, 0.0));
+                        let text_rect = Rect::from_min_max(
+                            rect.left_top() + Vec2::new(34.0, 0.0),
+                            rect.right_bottom() - Vec2::new(8.0, 0.0),
+                        );
                         let clip = p.with_clip_rect(text_rect);
-                        clip.galley(egui::pos2(text_rect.left(), rect.center().y - title_g.size().y / 2.0), title_g, pal.text);
+                        clip.galley(
+                            egui::pos2(text_rect.left(), rect.center().y - title_g.size().y / 2.0),
+                            title_g,
+                            pal.text,
+                        );
                         let sub = match s.kind {
-                            SuggestionKind::History | SuggestionKind::Bookmark => ferrosurf_core::util::pretty_url(&s.url),
+                            SuggestionKind::History | SuggestionKind::Bookmark => {
+                                ferrosurf_core::util::pretty_url(&s.url)
+                            }
                             SuggestionKind::OpenTab => "Cambiar a esta pestaña".into(),
                             _ => String::new(),
                         };
@@ -418,9 +570,12 @@ pub fn dropdown(ctx: &egui::Context, w: &mut BrowserWindow, env: &mut Env, cmds:
                 if let Some(id) = s.url.strip_prefix("tab:").and_then(|i| i.parse().ok()) {
                     cmds.push(Cmd::ActivateTab(id));
                 }
-            },
+            }
             SuggestionKind::Command => run_command(&s.url, cmds),
-            _ => cmds.push(Cmd::Navigate { input: s.url, disposition: Disposition::CurrentTab }),
+            _ => cmds.push(Cmd::Navigate {
+                input: s.url,
+                disposition: Disposition::CurrentTab,
+            }),
         }
         w.chrome.omnibox.close();
         ctx.memory_mut(|m| m.surrender_focus(field_id()));

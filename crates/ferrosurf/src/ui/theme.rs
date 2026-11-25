@@ -93,13 +93,21 @@ impl Palette {
     pub fn on_accent(&self) -> Color32 {
         let a = self.accent;
         let lum = 0.299 * a.r() as f32 + 0.587 * a.g() as f32 + 0.114 * a.b() as f32;
-        if lum > 160.0 { Color32::from_rgb(0x15, 0x17, 0x1c) } else { Color32::WHITE }
+        if lum > 160.0 {
+            Color32::from_rgb(0x15, 0x17, 0x1c)
+        } else {
+            Color32::WHITE
+        }
     }
 }
 
 pub fn window_bg(ctx: &egui::Context) -> [f32; 3] {
     let c = Palette::get(ctx).bg;
-    [c.r() as f32 / 255.0, c.g() as f32 / 255.0, c.b() as f32 / 255.0]
+    [
+        c.r() as f32 / 255.0,
+        c.g() as f32 / 255.0,
+        c.b() as f32 / 255.0,
+    ]
 }
 
 pub fn apply(ctx: &egui::Context, profile: &ProfileData, system: Option<winit::window::Theme>) {
@@ -110,7 +118,11 @@ pub fn apply(ctx: &egui::Context, profile: &ProfileData, system: Option<winit::w
     let app = &profile.settings.appearance;
     let radius = app.corner_radius.clamp(0.0, 16.0) as u8;
 
-    let mut v = if dark { Visuals::dark() } else { Visuals::light() };
+    let mut v = if dark {
+        Visuals::dark()
+    } else {
+        Visuals::light()
+    };
     v.panel_fill = pal.toolbar;
     v.window_fill = pal.toolbar;
     v.extreme_bg_color = pal.field;
@@ -122,9 +134,25 @@ pub fn apply(ctx: &egui::Context, profile: &ProfileData, system: Option<winit::w
     v.window_corner_radius = CornerRadius::same(radius.saturating_add(4));
     v.menu_corner_radius = CornerRadius::same(radius.saturating_add(2));
     v.window_stroke = Stroke::new(1.0, pal.border);
-    v.window_shadow = egui::epaint::Shadow { offset: [0, 6], blur: 24, spread: 0, color: Color32::from_black_alpha(if dark { 110 } else { 45 }) };
-    v.popup_shadow = egui::epaint::Shadow { offset: [0, 4], blur: 16, spread: 0, color: Color32::from_black_alpha(if dark { 100 } else { 40 }) };
-    for w in [&mut v.widgets.noninteractive, &mut v.widgets.inactive, &mut v.widgets.hovered, &mut v.widgets.active, &mut v.widgets.open] {
+    v.window_shadow = egui::epaint::Shadow {
+        offset: [0, 6],
+        blur: 24,
+        spread: 0,
+        color: Color32::from_black_alpha(if dark { 110 } else { 45 }),
+    };
+    v.popup_shadow = egui::epaint::Shadow {
+        offset: [0, 4],
+        blur: 16,
+        spread: 0,
+        color: Color32::from_black_alpha(if dark { 100 } else { 40 }),
+    };
+    for w in [
+        &mut v.widgets.noninteractive,
+        &mut v.widgets.inactive,
+        &mut v.widgets.hovered,
+        &mut v.widgets.active,
+        &mut v.widgets.open,
+    ] {
         w.corner_radius = CornerRadius::same(radius);
     }
     v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, pal.border);
@@ -150,11 +178,23 @@ pub fn apply(ctx: &egui::Context, profile: &ProfileData, system: Option<winit::w
     };
     ctx.global_style_mut(|style| {
         style.text_styles = [
-            (TextStyle::Small, FontId::new(base - 2.5, FontFamily::Proportional)),
+            (
+                TextStyle::Small,
+                FontId::new(base - 2.5, FontFamily::Proportional),
+            ),
             (TextStyle::Body, FontId::new(base, FontFamily::Proportional)),
-            (TextStyle::Button, FontId::new(base, FontFamily::Proportional)),
-            (TextStyle::Heading, FontId::new(base + 7.0, FontFamily::Proportional)),
-            (TextStyle::Monospace, FontId::new(base - 1.0, FontFamily::Monospace)),
+            (
+                TextStyle::Button,
+                FontId::new(base, FontFamily::Proportional),
+            ),
+            (
+                TextStyle::Heading,
+                FontId::new(base + 7.0, FontFamily::Proportional),
+            ),
+            (
+                TextStyle::Monospace,
+                FontId::new(base - 1.0, FontFamily::Monospace),
+            ),
         ]
         .into();
         style.spacing.item_spacing = egui::vec2(spacing, spacing);

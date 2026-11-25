@@ -192,7 +192,10 @@ impl ProfileManager {
 
     /// Delete a profile and all its data. The last profile cannot be deleted.
     pub fn delete(&mut self, id: &str) -> anyhow::Result<()> {
-        anyhow::ensure!(self.registry.profiles.len() > 1, "cannot delete the last profile");
+        anyhow::ensure!(
+            self.registry.profiles.len() > 1,
+            "cannot delete the last profile"
+        );
         let idx = self
             .registry
             .profiles

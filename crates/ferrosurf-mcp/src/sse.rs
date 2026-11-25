@@ -74,7 +74,10 @@ impl SseParser {
 
     fn dispatch(&mut self, out: &mut Vec<SseEvent>) {
         if self.has_fields {
-            out.push(SseEvent { event: self.event.take(), data: self.data.join("\n") });
+            out.push(SseEvent {
+                event: self.event.take(),
+                data: self.data.join("\n"),
+            });
         }
         self.event = None;
         self.data.clear();
@@ -111,12 +114,21 @@ mod tests {
         for b in body.chunks(3) {
             ev.extend(p.push(b));
         }
-        assert_eq!(ev.iter().map(|e| e.data.as_str()).collect::<Vec<_>>(), ["héllo", "two"]);
+        assert_eq!(
+            ev.iter().map(|e| e.data.as_str()).collect::<Vec<_>>(),
+            ["héllo", "two"]
+        );
     }
 
     #[test]
     fn trailing_event_flushed() {
         let ev = parse_all("data: last");
-        assert_eq!(ev, vec![SseEvent { event: None, data: "last".into() }]);
+        assert_eq!(
+            ev,
+            vec![SseEvent {
+                event: None,
+                data: "last".into()
+            }]
+        );
     }
 }

@@ -26,7 +26,9 @@ pub fn toolbar(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &mut Vec
             if widgets::icon_button(ui, icon::X, "Detener (Esc)", true).clicked() {
                 cmds.push(Cmd::Action(Action::Stop));
             }
-        } else if widgets::icon_button(ui, icon::ARROW_CLOCKWISE, "Recargar (Ctrl+R)", has_tab).clicked() {
+        } else if widgets::icon_button(ui, icon::ARROW_CLOCKWISE, "Recargar (Ctrl+R)", has_tab)
+            .clicked()
+        {
             cmds.push(Cmd::Action(Action::Reload));
         }
         if env.profile.settings.appearance.show_home_button
@@ -42,7 +44,14 @@ pub fn toolbar(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &mut Vec
             main_menu(ui, w, env, cmds);
             profile_button(ui, w, env, cmds);
             if env.profile.settings.assistant.enabled
-                && widgets::badge_button(ui, icon::SPARKLE, "Asistente IA (Ctrl+J)", None, w.chrome.assistant_open).clicked()
+                && widgets::badge_button(
+                    ui,
+                    icon::SPARKLE,
+                    "Asistente IA (Ctrl+J)",
+                    None,
+                    w.chrome.assistant_open,
+                )
+                .clicked()
             {
                 cmds.push(Cmd::Action(Action::ToggleAssistant));
             }
@@ -65,20 +74,45 @@ pub fn toolbar(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &mut Vec
 fn shield_button(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &mut Vec<Cmd>) {
     let blocked = w.active_tab().map(|t| t.blocked_requests).unwrap_or(0);
     let enabled = env.profile.settings.privacy.block_trackers;
-    let glyph = if enabled { icon::SHIELD_CHECK } else { icon::SHIELD_SLASH };
-    let badge = (enabled && blocked > 0).then(|| if blocked > 99 { "99+".to_string() } else { blocked.to_string() });
+    let glyph = if enabled {
+        icon::SHIELD_CHECK
+    } else {
+        icon::SHIELD_SLASH
+    };
+    let badge = (enabled && blocked > 0).then(|| {
+        if blocked > 99 {
+            "99+".to_string()
+        } else {
+            blocked.to_string()
+        }
+    });
     let resp = widgets::badge_button(ui, glyph, "Protección contra rastreadores", badge, false);
     egui::Popup::from_toggle_button_response(&resp)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| {
             ui.set_min_width(260.0);
-            ui.label(RichText::new(format!("{}  Protección contra rastreadores", icon::SHIELD_CHECK)).strong());
+            ui.label(
+                RichText::new(format!(
+                    "{}  Protección contra rastreadores",
+                    icon::SHIELD_CHECK
+                ))
+                .strong(),
+            );
             ui.add_space(4.0);
             ui.label(format!("Bloqueados en esta página: {blocked}"));
-            ui.label(RichText::new(format!("Total en esta sesión: {}", env.shared.blocked_total)).small());
+            ui.label(
+                RichText::new(format!(
+                    "Total en esta sesión: {}",
+                    env.shared.blocked_total
+                ))
+                .small(),
+            );
             ui.add_space(6.0);
             let mut on = enabled;
-            if ui.checkbox(&mut on, "Bloquear anuncios y rastreadores").changed() {
+            if ui
+                .checkbox(&mut on, "Bloquear anuncios y rastreadores")
+                .changed()
+            {
                 env.profile.settings.privacy.block_trackers = on;
                 env.profile.mark_settings_dirty();
                 cmds.push(Cmd::App(AppCmd::SettingsChanged));
@@ -113,8 +147,10 @@ fn downloads_button(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &mu
                 c + r * egui::vec2(a.cos(), a.sin())
             })
             .collect();
-        ui.painter().add(egui::Shape::line(pts, Stroke::new(2.0, pal.accent)));
-        ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
+        ui.painter()
+            .add(egui::Shape::line(pts, Stroke::new(2.0, pal.accent)));
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(250));
     }
     if resp.clicked() {
         env.shared.downloads_attention = false;
@@ -127,7 +163,12 @@ fn profile_button(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &mut 
     let color = super::theme::parse_hex(&env.profile.profile.color).unwrap_or(pal.accent);
     let size = ui.spacing().interact_size.y.max(28.0);
     let (rect, resp) = ui.allocate_exact_size(Vec2::splat(size), Sense::click());
-    widgets::paint_letter_avatar(ui.painter(), Rect::from_center_size(rect.center(), Vec2::splat(22.0)), &env.profile.profile.initial(), color);
+    widgets::paint_letter_avatar(
+        ui.painter(),
+        Rect::from_center_size(rect.center(), Vec2::splat(22.0)),
+        &env.profile.profile.initial(),
+        color,
+    );
     let resp = resp.on_hover_text(format!("Perfil: {}", env.profile.profile.name));
     egui::Popup::menu(&resp).show(|ui| {
         ui.set_min_width(240.0);
@@ -135,7 +176,15 @@ fn profile_button(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &mut 
             widgets::letter_avatar(ui, &env.profile.profile.initial(), color, 32.0);
             ui.vertical(|ui| {
                 ui.label(RichText::new(&env.profile.profile.name).strong());
-                ui.label(RichText::new(if w.guest { "Sesión de invitado" } else { "Perfil activo" }).small().color(pal.text_dim));
+                ui.label(
+                    RichText::new(if w.guest {
+                        "Sesión de invitado"
+                    } else {
+                        "Perfil activo"
+                    })
+                    .small()
+                    .color(pal.text_dim),
+                );
             });
         });
         ui.separator();
@@ -158,10 +207,19 @@ fn profile_button(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &mut 
                 }
             });
         }
-        if ui.button(format!("{}  Abrir ventana de invitado", icon::USER_CIRCLE_DASHED)).clicked() {
+        if ui
+            .button(format!(
+                "{}  Abrir ventana de invitado",
+                icon::USER_CIRCLE_DASHED
+            ))
+            .clicked()
+        {
             cmds.push(Cmd::App(AppCmd::NewGuestWindow));
         }
-        if ui.button(format!("{}  Gestionar perfiles", icon::USERS_THREE)).clicked() {
+        if ui
+            .button(format!("{}  Gestionar perfiles", icon::USERS_THREE))
+            .clicked()
+        {
             w.chrome.open_settings(SettingsPage::Profiles);
         }
     });
@@ -201,7 +259,11 @@ fn main_menu(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &mut Vec<C
         ui.horizontal(|ui| {
             ui.label(format!("{}  Zoom", icon::MAGNIFYING_GLASS));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button(icon::CORNERS_OUT).on_hover_text("Pantalla completa (F11)").clicked() {
+                if ui
+                    .button(icon::CORNERS_OUT)
+                    .on_hover_text("Pantalla completa (F11)")
+                    .clicked()
+                {
                     cmds.push(Cmd::Action(Action::Fullscreen));
                 }
                 if ui.button(icon::PLUS).clicked() {
@@ -221,19 +283,44 @@ fn main_menu(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &mut Vec<C
         item(ui, icon::SPARKLE, Action::ToggleAssistant, cmds);
         item(ui, icon::CAMERA, Action::Screenshot, cmds);
         ui.menu_button(format!("{}  Más herramientas", icon::WRENCH), |ui| {
-            if menu_item(ui, icon::CODE, &Action::ViewSource.label(), km.shortcut_for(Action::ViewSource)) {
+            if menu_item(
+                ui,
+                icon::CODE,
+                &Action::ViewSource.label(),
+                km.shortcut_for(Action::ViewSource),
+            ) {
                 cmds.push(Cmd::Action(Action::ViewSource));
             }
-            if menu_item(ui, icon::BUG, &Action::DevTools.label(), km.shortcut_for(Action::DevTools)) {
+            if menu_item(
+                ui,
+                icon::BUG,
+                &Action::DevTools.label(),
+                km.shortcut_for(Action::DevTools),
+            ) {
                 cmds.push(Cmd::Action(Action::DevTools));
             }
-            if menu_item(ui, icon::SIDEBAR, &Action::ToggleVerticalTabs.label(), km.shortcut_for(Action::ToggleVerticalTabs)) {
+            if menu_item(
+                ui,
+                icon::SIDEBAR,
+                &Action::ToggleVerticalTabs.label(),
+                km.shortcut_for(Action::ToggleVerticalTabs),
+            ) {
                 cmds.push(Cmd::Action(Action::ToggleVerticalTabs));
             }
-            if menu_item(ui, icon::BOOKMARK_SIMPLE, &Action::ToggleBookmarksBar.label(), km.shortcut_for(Action::ToggleBookmarksBar)) {
+            if menu_item(
+                ui,
+                icon::BOOKMARK_SIMPLE,
+                &Action::ToggleBookmarksBar.label(),
+                km.shortcut_for(Action::ToggleBookmarksBar),
+            ) {
                 cmds.push(Cmd::Action(Action::ToggleBookmarksBar));
             }
-            if menu_item(ui, icon::BROOM, &Action::ClearBrowsingData.label(), km.shortcut_for(Action::ClearBrowsingData)) {
+            if menu_item(
+                ui,
+                icon::BROOM,
+                &Action::ClearBrowsingData.label(),
+                km.shortcut_for(Action::ClearBrowsingData),
+            ) {
                 cmds.push(Cmd::Action(Action::ClearBrowsingData));
             }
             if menu_item(ui, icon::PLUGS_CONNECTED, "Conexión MCP", None) {
@@ -257,9 +344,12 @@ pub fn bookmarks_bar(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &m
         ui.set_height(24.0);
         if children.is_empty() {
             ui.label(
-                RichText::new(format!("{}  Pulsa Ctrl+D o la estrella para guardar páginas aquí", icon::STAR))
-                    .small()
-                    .color(pal.text_dim),
+                RichText::new(format!(
+                    "{}  Pulsa Ctrl+D o la estrella para guardar páginas aquí",
+                    icon::STAR
+                ))
+                .small()
+                .color(pal.text_dim),
             );
         }
         for node in &children {
@@ -268,13 +358,20 @@ pub fn bookmarks_bar(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &m
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let other = env.profile.bookmarks.other().children().to_vec();
             if !other.is_empty() {
-                let resp = ui.add(egui::Button::new(RichText::new(format!("{}  Otros marcadores", icon::FOLDER)).small()).fill(Color32::TRANSPARENT));
+                let resp = ui.add(
+                    egui::Button::new(
+                        RichText::new(format!("{}  Otros marcadores", icon::FOLDER)).small(),
+                    )
+                    .fill(Color32::TRANSPARENT),
+                );
                 egui::Popup::menu(&resp).show(|ui| {
-                    egui::ScrollArea::vertical().max_height(480.0).show(ui, |ui| {
-                        for n in &other {
-                            folder_menu_item(ui, n, cmds);
-                        }
-                    });
+                    egui::ScrollArea::vertical()
+                        .max_height(480.0)
+                        .show(ui, |ui| {
+                            for n in &other {
+                                folder_menu_item(ui, n, cmds);
+                            }
+                        });
                 });
             }
         });
@@ -287,14 +384,25 @@ fn bookmark_bar_item(ui: &mut Ui, node: &BookmarkNode, cmds: &mut Vec<Cmd>) {
         BookmarkNode::Bookmark(b) => {
             let title: String = b.title.chars().take(24).collect();
             let (rect, resp) = {
-                let galley_w = ui.fonts_mut(|f| f.layout_no_wrap(title.clone(), egui::FontId::proportional(12.0), Color32::WHITE).size().x);
+                let galley_w = ui.fonts_mut(|f| {
+                    f.layout_no_wrap(
+                        title.clone(),
+                        egui::FontId::proportional(12.0),
+                        Color32::WHITE,
+                    )
+                    .size()
+                    .x
+                });
                 ui.allocate_exact_size(Vec2::new(galley_w + 30.0, 24.0), Sense::click())
             };
             let pal = Palette::get(ui.ctx());
             if resp.hovered() {
                 ui.painter().rect_filled(rect, 6.0, pal.tab_hover);
             }
-            let icon_rect = Rect::from_center_size(rect.left_center() + Vec2::new(12.0, 0.0), Vec2::splat(13.0));
+            let icon_rect = Rect::from_center_size(
+                rect.left_center() + Vec2::new(12.0, 0.0),
+                Vec2::splat(13.0),
+            );
             widgets::paint_site_icon(ui.painter(), icon_rect, None, &b.title, &b.url);
             ui.painter().text(
                 rect.left_center() + Vec2::new(24.0, 0.0),
@@ -309,59 +417,80 @@ fn bookmark_bar_item(ui: &mut Ui, node: &BookmarkNode, cmds: &mut Vec<Cmd>) {
                 if let Ok(u) = url::Url::parse(&url) {
                     cmds.push(Cmd::OpenUrl {
                         url: u,
-                        disposition: if mods.command { Disposition::NewBackgroundTab } else { Disposition::CurrentTab },
+                        disposition: if mods.command {
+                            Disposition::NewBackgroundTab
+                        } else {
+                            Disposition::CurrentTab
+                        },
                     });
                 }
             }
             if resp.middle_clicked() {
                 if let Ok(u) = url::Url::parse(&url) {
-                    cmds.push(Cmd::OpenUrl { url: u, disposition: Disposition::NewBackgroundTab });
+                    cmds.push(Cmd::OpenUrl {
+                        url: u,
+                        disposition: Disposition::NewBackgroundTab,
+                    });
                 }
             }
-            resp.on_hover_text(format!("{}\n{}", b.title, b.url)).context_menu(|ui| {
-                if ui.button("Abrir en una pestaña nueva").clicked() {
-                    if let Ok(u) = url::Url::parse(&url) {
-                        cmds.push(Cmd::OpenUrl { url: u, disposition: Disposition::NewForegroundTab });
+            resp.on_hover_text(format!("{}\n{}", b.title, b.url))
+                .context_menu(|ui| {
+                    if ui.button("Abrir en una pestaña nueva").clicked() {
+                        if let Ok(u) = url::Url::parse(&url) {
+                            cmds.push(Cmd::OpenUrl {
+                                url: u,
+                                disposition: Disposition::NewForegroundTab,
+                            });
+                        }
                     }
-                }
-                if ui.button("Copiar enlace").clicked() {
-                    ui.ctx().copy_text(url.clone());
-                }
-                if ui.button("Gestionar marcadores…").clicked() {
-                    cmds.push(Cmd::Action(Action::ShowBookmarks));
-                }
-            });
-        },
-        BookmarkNode::Folder { title, children, .. } => {
-            let resp = ui.add(egui::Button::new(RichText::new(format!("{}  {}", icon::FOLDER, title)).size(12.0)).fill(Color32::TRANSPARENT));
+                    if ui.button("Copiar enlace").clicked() {
+                        ui.ctx().copy_text(url.clone());
+                    }
+                    if ui.button("Gestionar marcadores…").clicked() {
+                        cmds.push(Cmd::Action(Action::ShowBookmarks));
+                    }
+                });
+        }
+        BookmarkNode::Folder {
+            title, children, ..
+        } => {
+            let resp = ui.add(
+                egui::Button::new(RichText::new(format!("{}  {}", icon::FOLDER, title)).size(12.0))
+                    .fill(Color32::TRANSPARENT),
+            );
             egui::Popup::menu(&resp).show(|ui| {
-                egui::ScrollArea::vertical().max_height(480.0).show(ui, |ui| {
-                    if children.is_empty() {
-                        ui.label(RichText::new("(vacía)").weak());
-                    }
-                    for c in children {
-                        folder_menu_item(ui, c, cmds);
-                    }
-                    let urls: Vec<String> = children
-                        .iter()
-                        .filter_map(|c| match c {
-                            BookmarkNode::Bookmark(b) => Some(b.url.clone()),
-                            _ => None,
-                        })
-                        .collect();
-                    if urls.len() > 1 {
-                        ui.separator();
-                        if ui.button(format!("Abrir todos ({})", urls.len())).clicked() {
-                            for u in urls {
-                                if let Ok(u) = url::Url::parse(&u) {
-                                    cmds.push(Cmd::OpenUrl { url: u, disposition: Disposition::NewBackgroundTab });
+                egui::ScrollArea::vertical()
+                    .max_height(480.0)
+                    .show(ui, |ui| {
+                        if children.is_empty() {
+                            ui.label(RichText::new("(vacía)").weak());
+                        }
+                        for c in children {
+                            folder_menu_item(ui, c, cmds);
+                        }
+                        let urls: Vec<String> = children
+                            .iter()
+                            .filter_map(|c| match c {
+                                BookmarkNode::Bookmark(b) => Some(b.url.clone()),
+                                _ => None,
+                            })
+                            .collect();
+                        if urls.len() > 1 {
+                            ui.separator();
+                            if ui.button(format!("Abrir todos ({})", urls.len())).clicked() {
+                                for u in urls {
+                                    if let Ok(u) = url::Url::parse(&u) {
+                                        cmds.push(Cmd::OpenUrl {
+                                            url: u,
+                                            disposition: Disposition::NewBackgroundTab,
+                                        });
+                                    }
                                 }
                             }
                         }
-                    }
-                });
+                    });
             });
-        },
+        }
     }
 }
 
@@ -369,18 +498,27 @@ fn folder_menu_item(ui: &mut Ui, node: &BookmarkNode, cmds: &mut Vec<Cmd>) {
     match node {
         BookmarkNode::Bookmark(b) => {
             let title: String = b.title.chars().take(60).collect();
-            if ui.button(format!("{}  {}", icon::GLOBE_SIMPLE, title)).on_hover_text(&b.url).clicked() {
+            if ui
+                .button(format!("{}  {}", icon::GLOBE_SIMPLE, title))
+                .on_hover_text(&b.url)
+                .clicked()
+            {
                 if let Ok(u) = url::Url::parse(&b.url) {
-                    cmds.push(Cmd::OpenUrl { url: u, disposition: Disposition::CurrentTab });
+                    cmds.push(Cmd::OpenUrl {
+                        url: u,
+                        disposition: Disposition::CurrentTab,
+                    });
                 }
             }
-        },
-        BookmarkNode::Folder { title, children, .. } => {
+        }
+        BookmarkNode::Folder {
+            title, children, ..
+        } => {
             ui.menu_button(format!("{}  {}", icon::FOLDER, title), |ui| {
                 for c in children {
                     folder_menu_item(ui, c, cmds);
                 }
             });
-        },
+        }
     }
 }
