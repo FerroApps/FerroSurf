@@ -373,10 +373,10 @@ impl Keymap {
             }
         }
         for (action, spec) in default_bindings() {
-            if !overridden.contains(&action) {
-                if let Some(acc) = Accelerator::parse(spec) {
-                    bindings.push((acc, action));
-                }
+            if !overridden.contains(&action)
+                && let Some(acc) = Accelerator::parse(spec)
+            {
+                bindings.push((acc, action));
             }
         }
         Self { bindings }

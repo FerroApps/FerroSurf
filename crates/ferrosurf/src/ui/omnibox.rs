@@ -11,6 +11,9 @@ use super::{Palette, widgets};
 use crate::actions::Action;
 use crate::window::{BrowserWindow, Cmd, Disposition, Env};
 
+/// Search suggestions fetched in the background: (query, suggestions).
+type RemoteSlot = Arc<parking_lot::Mutex<Option<(String, Vec<String>)>>>;
+
 #[derive(Clone, Copy)]
 pub struct FieldRect(pub Rect);
 
@@ -29,7 +32,7 @@ pub struct OmniboxState {
     pub suggestions: Vec<Suggestion>,
     pub inline_completion: Option<String>,
     last_query: String,
-    remote: Arc<parking_lot::Mutex<Option<(String, Vec<String>)>>>,
+    remote: RemoteSlot,
     remote_results: (String, Vec<String>),
     last_keystroke: Option<Instant>,
     fetched_for: String,
@@ -260,7 +263,7 @@ pub fn omnibox(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &mut Vec
     // Right side: zoom badge + bookmark star.
     inner.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
-        let star = if bookmarked { icon::STAR } else { icon::STAR };
+        let star = icon::STAR;
         let star_resp = ui.add(
             egui::Button::new(RichText::new(star).size(16.0).color(if bookmarked {
                 pal.accent
@@ -292,8 +295,7 @@ pub fn omnibox(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &mut Vec
 
 /// Hide the scheme and trailing slash when not editing.
 fn prettify_for_display(url: &str) -> String {
-    if url.starts_with("https://") {
-        let s = &url["https://".len()..];
+    if let Some(s) = url.strip_prefix("https://") {
         s.strip_suffix('/')
             .filter(|r| !r.contains('/'))
             .unwrap_or(s)
@@ -349,13 +351,12 @@ fn update_suggestions(w: &mut BrowserWindow, env: &mut Env) {
                     .timeout_global(Some(Duration::from_secs(3)))
                     .build()
                     .into();
-                if let Ok(mut resp) = agent.get(url.as_str()).call() {
-                    if let Ok(body) = resp.body_mut().read_to_string() {
-                        *slot.lock() =
-                            Some((query, ferrosurf_core::search::parse_suggestions(&body)));
-                        if let Some(wake) = wake {
-                            wake();
-                        }
+                if let Ok(mut resp) = agent.get(url.as_str()).call()
+                    && let Ok(body) = resp.body_mut().read_to_string()
+                {
+                    *slot.lock() = Some((query, ferrosurf_core::search::parse_suggestions(&body)));
+                    if let Some(wake) = wake {
+                        wake();
                     }
                 }
             });

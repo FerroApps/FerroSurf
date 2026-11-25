@@ -443,10 +443,10 @@ pub fn show_all(ctx: &egui::Context, w: &mut BrowserWindow, env: &mut Env, cmds:
             });
         if let Some(ok) = submit {
             let mut prompt = w.chrome.auth_prompts.remove(idx);
-            if let Some(req) = prompt.request.take() {
-                if ok {
-                    req.authenticate(prompt.user.clone(), prompt.password.clone());
-                }
+            if let Some(req) = prompt.request.take()
+                && ok
+            {
+                req.authenticate(prompt.user.clone(), prompt.password.clone());
             }
         }
     }

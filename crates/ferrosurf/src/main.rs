@@ -117,10 +117,10 @@ fn run_mcp_stdio(cli: &Cli) -> anyhow::Result<()> {
         // Wait for the browser to come up if it isn't running yet (start it if needed).
         let mut started = false;
         for attempt in 0..60 {
-            if let Ok(ep) = ferrosurf_mcp::EndpointFile::read(&endpoint_path) {
-                if app::pid_alive(ep.pid) {
-                    return ferrosurf_mcp::run_stdio_bridge(&ep.url, &ep.token).await;
-                }
+            if let Ok(ep) = ferrosurf_mcp::EndpointFile::read(&endpoint_path)
+                && app::pid_alive(ep.pid)
+            {
+                return ferrosurf_mcp::run_stdio_bridge(&ep.url, &ep.token).await;
             }
             if !started && attempt == 0 {
                 started = true;

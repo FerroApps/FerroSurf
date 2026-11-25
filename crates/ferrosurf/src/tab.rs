@@ -105,10 +105,11 @@ impl Tab {
     }
 
     pub fn is_secure(&self) -> Option<bool> {
-        self.url.as_ref().map(|u| match u.scheme() {
-            "https" | "wss" => true,
-            "ferro" | "about" | "file" | "data" => true,
-            _ => false,
+        self.url.as_ref().map(|u| {
+            matches!(
+                u.scheme(),
+                "https" | "wss" | "ferro" | "about" | "file" | "data"
+            )
         })
     }
 

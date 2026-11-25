@@ -173,7 +173,7 @@ fn host_of(url: &str) -> String {
 }
 
 fn push_group(out: &mut Vec<Entry>, mut group: Vec<Entry>, limit: usize) {
-    group.sort_by(|a, b| b.score.cmp(&a.score));
+    group.sort_by_key(|e| std::cmp::Reverse(e.score));
     group.truncate(limit);
     out.extend(group);
 }

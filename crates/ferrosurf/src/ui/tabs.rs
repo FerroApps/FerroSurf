@@ -233,16 +233,16 @@ pub fn tab_strip(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &mut V
             let hovered = resp.hovered();
             let compact = t.pinned || width < 70.0;
             let mut paint_rect = rect;
-            if drag_id == Some(t.id) {
-                if let Some(p) = ui.ctx().pointer_interact_pos() {
-                    let off = w
-                        .chrome
-                        .tab_drag
-                        .as_ref()
-                        .map(|d| d.grab_offset)
-                        .unwrap_or(0.0);
-                    paint_rect = rect.translate(Vec2::new(p.x - off - rect.left(), 0.0));
-                }
+            if drag_id == Some(t.id)
+                && let Some(p) = ui.ctx().pointer_interact_pos()
+            {
+                let off = w
+                    .chrome
+                    .tab_drag
+                    .as_ref()
+                    .map(|d| d.grab_offset)
+                    .unwrap_or(0.0);
+                paint_rect = rect.translate(Vec2::new(p.x - off - rect.left(), 0.0));
             }
             let close_rect = paint_tab(
                 ui,
@@ -298,20 +298,20 @@ pub fn tab_strip(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &mut V
         // Drag reorder: drop position by pointer x.
         if let Some(drag) = &w.chrome.tab_drag {
             let released = ui.input(|i| i.pointer.any_released());
-            if let Some(p) = ui.ctx().pointer_interact_pos() {
-                if let Some(from) = tabs.iter().position(|t| t.id == drag.id) {
-                    let mut to = rects
-                        .iter()
-                        .position(|r| p.x < r.center().x)
-                        .unwrap_or(rects.len());
-                    if to > from {
-                        to -= 1;
-                    }
-                    if to != from
-                        && tabs[from].pinned == tabs.get(to).map(|t| t.pinned).unwrap_or(false)
-                    {
-                        cmds.push(Cmd::MoveTab { from, to });
-                    }
+            if let Some(p) = ui.ctx().pointer_interact_pos()
+                && let Some(from) = tabs.iter().position(|t| t.id == drag.id)
+            {
+                let mut to = rects
+                    .iter()
+                    .position(|r| p.x < r.center().x)
+                    .unwrap_or(rects.len());
+                if to > from {
+                    to -= 1;
+                }
+                if to != from
+                    && tabs[from].pinned == tabs.get(to).map(|t| t.pinned).unwrap_or(false)
+                {
+                    cmds.push(Cmd::MoveTab { from, to });
                 }
             }
             if released {
@@ -505,13 +505,13 @@ pub fn vertical_tabs(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &m
                 if resp.middle_clicked() {
                     cmds.push(Cmd::CloseTab(t.id));
                 }
-                if resp.dragged() {
-                    if let Some(p) = ui.ctx().pointer_interact_pos() {
-                        if p.y < rect.top() - 4.0 && i > 0 {
-                            cmds.push(Cmd::MoveTab { from: i, to: i - 1 });
-                        } else if p.y > rect.bottom() + 4.0 && i + 1 < tabs.len() {
-                            cmds.push(Cmd::MoveTab { from: i, to: i + 1 });
-                        }
+                if resp.dragged()
+                    && let Some(p) = ui.ctx().pointer_interact_pos()
+                {
+                    if p.y < rect.top() - 4.0 && i > 0 {
+                        cmds.push(Cmd::MoveTab { from: i, to: i - 1 });
+                    } else if p.y > rect.bottom() + 4.0 && i + 1 < tabs.len() {
+                        cmds.push(Cmd::MoveTab { from: i, to: i + 1 });
                     }
                 }
                 let title = t.title.clone();

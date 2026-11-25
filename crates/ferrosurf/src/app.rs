@@ -231,9 +231,11 @@ impl App {
         )?;
 
         // Servo, configured per profile.
-        let mut opts = Opts::default();
-        opts.config_dir = Some(profile_data.paths.engine());
-        opts.temporary_storage = profile_data.profile.ephemeral;
+        let opts = Opts {
+            config_dir: Some(profile_data.paths.engine()),
+            temporary_storage: profile_data.profile.ephemeral,
+            ..Opts::default()
+        };
         let mut prefs = Preferences::default();
         if !profile_data.settings.user_agent.trim().is_empty() {
             prefs.user_agent = profile_data.settings.user_agent.trim().to_string();
@@ -319,11 +321,11 @@ impl App {
         };
         running.with_window(0, |w, env| {
             let mut restored = false;
-            if let Some(session) = &session {
-                if let Some(ws) = session.windows.first() {
-                    restore_window_tabs(w, env, ws);
-                    restored = !w.tabs.is_empty();
-                }
+            if let Some(session) = &session
+                && let Some(ws) = session.windows.first()
+            {
+                restore_window_tabs(w, env, ws);
+                restored = !w.tabs.is_empty();
             }
             if !restored && urls.is_empty() {
                 let start = match env.profile.settings.startup {
@@ -677,10 +679,12 @@ impl Running {
                         }
                         let tab_id = tab.id;
                         self.mcp.on_load_complete(tab_id);
-                        if let Some(job) = &mut self.screenshot {
-                            if job.loaded_at.is_none() && wi == 0 && ti == self.windows[0].active {
-                                job.loaded_at = Some(Instant::now());
-                            }
+                        if let Some(job) = &mut self.screenshot
+                            && job.loaded_at.is_none()
+                            && wi == 0
+                            && ti == self.windows[0].active
+                        {
+                            job.loaded_at = Some(Instant::now());
                         }
                     }
                     self.windows[wi].window.request_redraw();
@@ -866,21 +870,21 @@ impl Running {
             return;
         }
         // Native internal pages.
-        if url.scheme() == "ferro" {
-            if let Some(host) = url.host_str() {
-                let action = match host {
-                    "settings" => Some(crate::actions::Action::ShowSettings),
-                    "history" => Some(crate::actions::Action::ShowHistory),
-                    "bookmarks" => Some(crate::actions::Action::ShowBookmarks),
-                    "downloads" => Some(crate::actions::Action::ShowDownloads),
-                    "extensions" => Some(crate::actions::Action::ShowExtensions),
-                    _ => None,
-                };
-                if let (Some(a), Some((wi, _))) = (action, loc) {
-                    request.deny();
-                    self.with_window(wi, |w, env| w.run_action(env, a));
-                    return;
-                }
+        if url.scheme() == "ferro"
+            && let Some(host) = url.host_str()
+        {
+            let action = match host {
+                "settings" => Some(crate::actions::Action::ShowSettings),
+                "history" => Some(crate::actions::Action::ShowHistory),
+                "bookmarks" => Some(crate::actions::Action::ShowBookmarks),
+                "downloads" => Some(crate::actions::Action::ShowDownloads),
+                "extensions" => Some(crate::actions::Action::ShowExtensions),
+                _ => None,
+            };
+            if let (Some(a), Some((wi, _))) = (action, loc) {
+                request.deny();
+                self.with_window(wi, |w, env| w.run_action(env, a));
+                return;
             }
         }
         // Likely downloads (Servo can't render these).
@@ -896,12 +900,12 @@ impl Running {
             return;
         }
         // HTTPS-only mode.
-        if self.profile.settings.privacy.https_only {
-            if let Some(https) = ferrosurf_core::omnibox::https_upgrade(&url) {
-                request.deny();
-                wv.load(https);
-                return;
-            }
+        if self.profile.settings.privacy.https_only
+            && let Some(https) = ferrosurf_core::omnibox::https_upgrade(&url)
+        {
+            request.deny();
+            wv.load(https);
+            return;
         }
         request.allow();
     }
@@ -1152,18 +1156,17 @@ impl Running {
             if external
                 && self.profile.settings.mcp_server.confirm_actions
                 && !self.shared.mcp_trusted_session
+                && let Some(description) = crate::mcp_host::describe_mutation(&cmd)
             {
-                if let Some(description) = crate::mcp_host::describe_mutation(&cmd) {
-                    self.shared
-                        .mcp_approvals
-                        .push(crate::mcp_host::PendingApproval {
-                            description,
-                            cmd,
-                            reply,
-                        });
-                    self.request_redraw_all();
-                    continue;
-                }
+                self.shared
+                    .mcp_approvals
+                    .push(crate::mcp_host::PendingApproval {
+                        description,
+                        cmd,
+                        reply,
+                    });
+                self.request_redraw_all();
+                continue;
             }
             let result = self.exec_mcp_command(cmd, reply);
             if let Some((reply, res)) = result {
@@ -1478,12 +1481,13 @@ impl Running {
 
 impl ApplicationHandler<AppEvent> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if self.state.is_none() && self.failed.is_none() {
-            if let Err(e) = self.init(event_loop) {
-                log::error!("Startup failed: {e:#}");
-                self.failed = Some(e);
-                event_loop.exit();
-            }
+        if self.state.is_none()
+            && self.failed.is_none()
+            && let Err(e) = self.init(event_loop)
+        {
+            log::error!("Startup failed: {e:#}");
+            self.failed = Some(e);
+            event_loop.exit();
         }
     }
 
@@ -1531,10 +1535,10 @@ impl ApplicationHandler<AppEvent> for App {
             _ => {}
         }
         state.with_window(idx, |w, env| w.handle_window_event(env, &event));
-        if let Some(w) = state.windows.get(idx) {
-            if w.needs_redraw {
-                w.window.request_redraw();
-            }
+        if let Some(w) = state.windows.get(idx)
+            && w.needs_redraw
+        {
+            w.window.request_redraw();
         }
         state.process_app_cmds(event_loop);
     }

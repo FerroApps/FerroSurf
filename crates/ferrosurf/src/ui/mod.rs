@@ -350,6 +350,9 @@ pub fn draw(
     toasts(&ctx, env, &pal);
 }
 
+/// Servo's "blit the offscreen framebuffer into the window" callback.
+type BlitToParent = dyn Fn(&glow::Context, euclid::default::Rect<i32>) + Send + Sync;
+
 fn content_area(
     ui: &mut egui::Ui,
     rect: Rect,
@@ -375,8 +378,7 @@ fn content_area(
 
     if let (true, None) = (live, &crashed) {
         if let Some(render) = offscreen.render_to_parent_callback() {
-            let render: Arc<dyn Fn(&glow::Context, euclid::default::Rect<i32>) + Send + Sync> =
-                Arc::from(render);
+            let render: Arc<BlitToParent> = Arc::from(render);
             let cb = egui_glow::CallbackFn::new(move |info, painter| {
                 let vp = info.viewport_in_pixels();
                 let target = euclid::default::Rect::new(
@@ -417,29 +419,29 @@ fn content_area(
     }
 
     // Status bubble (link previews).
-    if env.profile.settings.appearance.show_status_bubble {
-        if let Some(text) = status.filter(|s| !s.is_empty()) {
-            let galley = ui.painter().layout_no_wrap(
-                ferrosurf_core::util::pretty_url(&text),
-                egui::FontId::proportional(12.0),
-                pal.text,
-            );
-            let size = galley.size() + egui::vec2(16.0, 8.0);
-            let r = Rect::from_min_size(
-                Pos2::new(rect.left() + 6.0, rect.bottom() - size.y - 6.0),
-                size.min(egui::vec2(rect.width() * 0.6, 40.0)),
-            );
-            ui.painter().rect(
-                r,
-                6.0,
-                pal.toolbar,
-                egui::Stroke::new(1.0, pal.border),
-                egui::StrokeKind::Inside,
-            );
-            ui.painter()
-                .with_clip_rect(r)
-                .galley(r.min + egui::vec2(8.0, 4.0), galley, pal.text);
-        }
+    if env.profile.settings.appearance.show_status_bubble
+        && let Some(text) = status.filter(|s| !s.is_empty())
+    {
+        let galley = ui.painter().layout_no_wrap(
+            ferrosurf_core::util::pretty_url(&text),
+            egui::FontId::proportional(12.0),
+            pal.text,
+        );
+        let size = galley.size() + egui::vec2(16.0, 8.0);
+        let r = Rect::from_min_size(
+            Pos2::new(rect.left() + 6.0, rect.bottom() - size.y - 6.0),
+            size.min(egui::vec2(rect.width() * 0.6, 40.0)),
+        );
+        ui.painter().rect(
+            r,
+            6.0,
+            pal.toolbar,
+            egui::Stroke::new(1.0, pal.border),
+            egui::StrokeKind::Inside,
+        );
+        ui.painter()
+            .with_clip_rect(r)
+            .galley(r.min + egui::vec2(8.0, 4.0), galley, pal.text);
     }
 
     // Zoom indicator.

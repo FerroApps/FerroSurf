@@ -425,23 +425,23 @@ fn bookmark_bar_item(ui: &mut Ui, node: &BookmarkNode, cmds: &mut Vec<Cmd>) {
                     });
                 }
             }
-            if resp.middle_clicked() {
-                if let Ok(u) = url::Url::parse(&url) {
-                    cmds.push(Cmd::OpenUrl {
-                        url: u,
-                        disposition: Disposition::NewBackgroundTab,
-                    });
-                }
+            if resp.middle_clicked()
+                && let Ok(u) = url::Url::parse(&url)
+            {
+                cmds.push(Cmd::OpenUrl {
+                    url: u,
+                    disposition: Disposition::NewBackgroundTab,
+                });
             }
             resp.on_hover_text(format!("{}\n{}", b.title, b.url))
                 .context_menu(|ui| {
-                    if ui.button("Abrir en una pestaña nueva").clicked() {
-                        if let Ok(u) = url::Url::parse(&url) {
-                            cmds.push(Cmd::OpenUrl {
-                                url: u,
-                                disposition: Disposition::NewForegroundTab,
-                            });
-                        }
+                    if ui.button("Abrir en una pestaña nueva").clicked()
+                        && let Ok(u) = url::Url::parse(&url)
+                    {
+                        cmds.push(Cmd::OpenUrl {
+                            url: u,
+                            disposition: Disposition::NewForegroundTab,
+                        });
                     }
                     if ui.button("Copiar enlace").clicked() {
                         ui.ctx().copy_text(url.clone());
@@ -502,13 +502,12 @@ fn folder_menu_item(ui: &mut Ui, node: &BookmarkNode, cmds: &mut Vec<Cmd>) {
                 .button(format!("{}  {}", icon::GLOBE_SIMPLE, title))
                 .on_hover_text(&b.url)
                 .clicked()
+                && let Ok(u) = url::Url::parse(&b.url)
             {
-                if let Ok(u) = url::Url::parse(&b.url) {
-                    cmds.push(Cmd::OpenUrl {
-                        url: u,
-                        disposition: Disposition::CurrentTab,
-                    });
-                }
+                cmds.push(Cmd::OpenUrl {
+                    url: u,
+                    disposition: Disposition::CurrentTab,
+                });
             }
         }
         BookmarkNode::Folder {

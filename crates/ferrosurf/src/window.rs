@@ -63,6 +63,7 @@ pub struct Env<'a> {
 }
 
 /// Where to open a URL.
+#[allow(clippy::enum_variant_names)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Disposition {
     CurrentTab,
@@ -383,11 +384,11 @@ impl BrowserWindow {
         if idx >= self.tabs.len() {
             return;
         }
-        if let Some(prev) = self.tabs.get(self.active).and_then(|t| t.webview.as_ref()) {
-            if self.active != idx {
-                prev.hide();
-                prev.set_focused(false);
-            }
+        if let Some(prev) = self.tabs.get(self.active).and_then(|t| t.webview.as_ref())
+            && self.active != idx
+        {
+            prev.hide();
+            prev.set_focused(false);
         }
         self.active = idx;
         self.wake_tab(env, idx);
@@ -408,18 +409,18 @@ impl BrowserWindow {
             return;
         }
         let tab = self.tabs.remove(idx);
-        if let Some(url) = &tab.url {
-            if !(url.scheme() == "ferro" && url.host_str() == Some("newtab")) {
-                env.profile
-                    .closed_tabs
-                    .push(ferrosurf_core::session::TabState {
-                        url: url.to_string(),
-                        title: tab.title.clone(),
-                        pinned: tab.pinned,
-                        zoom: tab.zoom,
-                        ..Default::default()
-                    });
-            }
+        if let Some(url) = &tab.url
+            && !(url.scheme() == "ferro" && url.host_str() == Some("newtab"))
+        {
+            env.profile
+                .closed_tabs
+                .push(ferrosurf_core::session::TabState {
+                    url: url.to_string(),
+                    title: tab.title.clone(),
+                    pinned: tab.pinned,
+                    zoom: tab.zoom,
+                    ..Default::default()
+                });
         }
         self.controls.retain(|(t, _)| *t != tab.id);
         drop(tab); // dropping the WebView closes it
@@ -457,10 +458,10 @@ impl BrowserWindow {
                 _ => {}
             }
         }
-        if env.profile.settings.privacy.https_only {
-            if let Some(u) = ferrosurf_core::omnibox::https_upgrade(&url) {
-                url = u;
-            }
+        if env.profile.settings.privacy.https_only
+            && let Some(u) = ferrosurf_core::omnibox::https_upgrade(&url)
+        {
+            url = u;
         }
         if let Some(tab) = self.active_tab_mut() {
             tab.typed_navigation = true;
@@ -524,12 +525,12 @@ impl BrowserWindow {
             }
             CloseTab => self.close_tab(env, self.active),
             ReopenClosedTab => {
-                if let Some(state) = env.profile.closed_tabs.pop() {
-                    if let Ok(url) = Url::parse(&state.url) {
-                        let id = self.open_tab(env, Some(url), true, None);
-                        if let Some(i) = self.tab_index(id) {
-                            self.tabs[i].pinned = state.pinned;
-                        }
+                if let Some(state) = env.profile.closed_tabs.pop()
+                    && let Ok(url) = Url::parse(&state.url)
+                {
+                    let id = self.open_tab(env, Some(url), true, None);
+                    if let Some(i) = self.tab_index(id) {
+                        self.tabs[i].pinned = state.pinned;
                     }
                 }
             }
@@ -576,17 +577,17 @@ impl BrowserWindow {
                 }
             }
             Back => {
-                if let Some(w) = &active_wv {
-                    if w.can_go_back() {
-                        w.go_back(1);
-                    }
+                if let Some(w) = &active_wv
+                    && w.can_go_back()
+                {
+                    w.go_back(1);
                 }
             }
             Forward => {
-                if let Some(w) = &active_wv {
-                    if w.can_go_forward() {
-                        w.go_forward(1);
-                    }
+                if let Some(w) = &active_wv
+                    && w.can_go_forward()
+                {
+                    w.go_forward(1);
                 }
             }
             Home => {
@@ -608,7 +609,7 @@ impl BrowserWindow {
                                 .profile
                                 .bookmarks
                                 .find_by_url(&url)
-                                .map(|b| ui::BookmarkEditor::new(b));
+                                .map(ui::BookmarkEditor::new);
                         }
                         env.shared.toast(if added {
                             "Añadido a marcadores"
@@ -692,10 +693,10 @@ impl BrowserWindow {
             }
             Screenshot => self.screenshot_requested = true,
             ViewSource => {
-                if let Some(url) = self.active_tab().and_then(|t| t.url.clone()) {
-                    if let Ok(u) = Url::parse(&format!("view-source:{url}")) {
-                        self.open_tab(env, Some(u), true, None);
-                    }
+                if let Some(url) = self.active_tab().and_then(|t| t.url.clone())
+                    && let Ok(u) = Url::parse(&format!("view-source:{url}"))
+                {
+                    self.open_tab(env, Some(u), true, None);
                 }
             }
             Quit => env.app_cmds.push(AppCmd::Quit),
@@ -857,36 +858,25 @@ impl BrowserWindow {
             is_synthetic: false,
             ..
         } = event
+            && key_event.state == ElementState::Pressed
+            && let Some(acc) = Accelerator::from_key(&key_event.logical_key, self.modifiers)
+            && let Some(action) = env.keymap.lookup(&acc)
         {
-            if key_event.state == ElementState::Pressed {
-                if let Some(acc) = Accelerator::from_key(&key_event.logical_key, self.modifiers) {
-                    if let Some(action) = env.keymap.lookup(&acc) {
-                        let typing_in_ui = self.egui_ctx.egui_wants_keyboard_input();
-                        // Plain keys (Escape, F-keys) always work; Ctrl/Alt shortcuts too.
-                        // Don't steal editing shortcuts from egui text fields.
-                        let editing_combo = typing_in_ui
-                            && acc.ctrl
-                            && !acc.shift
-                            && matches!(
-                                acc.key.as_str(),
-                                "a" | "c"
-                                    | "v"
-                                    | "x"
-                                    | "z"
-                                    | "y"
-                                    | "left"
-                                    | "right"
-                                    | "backspace"
-                                    | "delete"
-                            );
-                        let stop_in_ui = typing_in_ui && action == Action::Stop;
-                        if !editing_combo && !stop_in_ui {
-                            self.run_action(env, action);
-                            self.needs_redraw = true;
-                            return;
-                        }
-                    }
-                }
+            let typing_in_ui = self.egui_ctx.egui_wants_keyboard_input();
+            // Plain keys (Escape, F-keys) always work; Ctrl/Alt shortcuts too.
+            // Don't steal editing shortcuts from egui text fields.
+            let editing_combo = typing_in_ui
+                && acc.ctrl
+                && !acc.shift
+                && matches!(
+                    acc.key.as_str(),
+                    "a" | "c" | "v" | "x" | "z" | "y" | "left" | "right" | "backspace" | "delete"
+                );
+            let stop_in_ui = typing_in_ui && action == Action::Stop;
+            if !editing_combo && !stop_in_ui {
+                self.run_action(env, action);
+                self.needs_redraw = true;
+                return;
             }
         }
 
@@ -1015,25 +1005,26 @@ impl BrowserWindow {
             WindowEvent::KeyboardInput {
                 event: key_event, ..
             } => {
-                if !self.egui_ctx.egui_wants_keyboard_input() && !self.chrome.has_modal() {
-                    if let Some(w) = self.active_webview() {
-                        w.notify_input_event(InputEvent::Keyboard(crate::input::keyboard_event(
-                            key_event,
-                            self.modifiers,
-                        )));
-                    }
+                if !self.egui_ctx.egui_wants_keyboard_input()
+                    && !self.chrome.has_modal()
+                    && let Some(w) = self.active_webview()
+                {
+                    w.notify_input_event(InputEvent::Keyboard(crate::input::keyboard_event(
+                        key_event,
+                        self.modifiers,
+                    )));
                 }
             }
             WindowEvent::Ime(winit::event::Ime::Commit(text)) => {
-                if !self.egui_ctx.egui_wants_keyboard_input() {
-                    if let Some(w) = self.active_webview() {
-                        w.notify_input_event(InputEvent::Ime(servo::ImeEvent::Composition(
-                            servo::CompositionEvent {
-                                state: servo::CompositionState::End,
-                                data: text.clone(),
-                            },
-                        )));
-                    }
+                if !self.egui_ctx.egui_wants_keyboard_input()
+                    && let Some(w) = self.active_webview()
+                {
+                    w.notify_input_event(InputEvent::Ime(servo::ImeEvent::Composition(
+                        servo::CompositionEvent {
+                            state: servo::CompositionState::End,
+                            data: text.clone(),
+                        },
+                    )));
                 }
             }
             WindowEvent::Focused(focused) => {
@@ -1167,10 +1158,10 @@ pub fn interpret_input(env: &Env, input: &str) -> Option<Url> {
     let default = env.profile.settings.current_search_engine();
     let interp = ferrosurf_core::omnibox::interpret(input, &default, &engines)?;
     let mut url = interp.url().clone();
-    if env.profile.settings.privacy.https_only {
-        if let Some(u) = ferrosurf_core::omnibox::https_upgrade(&url) {
-            url = u;
-        }
+    if env.profile.settings.privacy.https_only
+        && let Some(u) = ferrosurf_core::omnibox::https_upgrade(&url)
+    {
+        url = u;
     }
     Some(url)
 }

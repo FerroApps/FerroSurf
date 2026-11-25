@@ -1849,10 +1849,10 @@ fn profiles(ui: &mut Ui, st: &mut SettingsState, env: &mut Env, cmds: &mut Vec<C
 
     widgets::section(ui, "Opciones");
     card(ui, |ui| {
-        if toggle(ui, &mut ask, "Preguntar qué perfil usar al iniciar", "") {
-            if let Err(e) = env.profile.profiles.borrow_mut().set_ask_on_startup(ask) {
-                error = Some(format!("Error: {e}"));
-            }
+        if toggle(ui, &mut ask, "Preguntar qué perfil usar al iniciar", "")
+            && let Err(e) = env.profile.profiles.borrow_mut().set_ask_on_startup(ask)
+        {
+            error = Some(format!("Error: {e}"));
         }
         sep(ui);
         row(

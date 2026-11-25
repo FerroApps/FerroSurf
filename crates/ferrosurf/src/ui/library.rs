@@ -372,13 +372,12 @@ fn bookmarks_view(
                 &format!("{}  Añadir página actual", icon::BOOKMARK_SIMPLE),
             )
             .clicked()
+                && let Some((url, title)) = &current
             {
-                if let Some((url, title)) = &current {
-                    ops.push(Op::AddCurrent {
-                        title: title.clone(),
-                        url: url.clone(),
-                    });
-                }
+                ops.push(Op::AddCurrent {
+                    title: title.clone(),
+                    url: url.clone(),
+                });
             }
         });
         ui.menu_button(icon::DOTS_THREE, |ui| {
@@ -993,12 +992,11 @@ fn apply_ops(ops: Vec<Op>, env: &mut Env, cmds: &mut Vec<Cmd>, st: &mut LibraryS
                 let mut index = index;
                 for root in env.profile.bookmarks.roots() {
                     if let Some((p, old)) = find_parent(root, id) {
-                        if p == parent {
-                            if let Some(ix) = index {
-                                if old < ix {
-                                    index = Some(ix - 1);
-                                }
-                            }
+                        if p == parent
+                            && let Some(ix) = index
+                            && old < ix
+                        {
+                            index = Some(ix - 1);
                         }
                         break;
                     }
@@ -1037,10 +1035,10 @@ fn apply_ops(ops: Vec<Op>, env: &mut Env, cmds: &mut Vec<Cmd>, st: &mut LibraryS
             }
             Op::Rename { id, title } => {
                 let title = title.trim();
-                if !title.is_empty() {
-                    if let Err(e) = env.profile.bookmarks.rename(id, title) {
-                        env.shared.toast(&format!("No se pudo renombrar: {e}"));
-                    }
+                if !title.is_empty()
+                    && let Err(e) = env.profile.bookmarks.rename(id, title)
+                {
+                    env.shared.toast(&format!("No se pudo renombrar: {e}"));
                 }
             }
             Op::AddCurrent { title, url } => {
@@ -1122,10 +1120,10 @@ fn local_offset() -> UtcOffset {
             let s = s.trim();
             if s.len() == 5 {
                 let sign = if s.starts_with('-') { -1i8 } else { 1 };
-                if let (Ok(h), Ok(m)) = (s[1..3].parse::<i8>(), s[3..5].parse::<i8>()) {
-                    if let Ok(o) = UtcOffset::from_hms(sign * h, sign * m, 0) {
-                        return o;
-                    }
+                if let (Ok(h), Ok(m)) = (s[1..3].parse::<i8>(), s[3..5].parse::<i8>())
+                    && let Ok(o) = UtcOffset::from_hms(sign * h, sign * m, 0)
+                {
+                    return o;
                 }
             }
         }
@@ -1661,17 +1659,17 @@ fn download_buttons(ui: &mut Ui, env: &mut Env, it: &DownloadItem, exists: bool)
             }
         }
         DownloadState::Completed => {
-            if widgets::icon_button(ui, icon::ARROW_SQUARE_OUT, "Abrir archivo", exists).clicked() {
-                if let Err(e) = DownloadManager::open_file(&it.path) {
-                    env.shared
-                        .toast(&format!("No se pudo abrir el archivo: {e}"));
-                }
+            if widgets::icon_button(ui, icon::ARROW_SQUARE_OUT, "Abrir archivo", exists).clicked()
+                && let Err(e) = DownloadManager::open_file(&it.path)
+            {
+                env.shared
+                    .toast(&format!("No se pudo abrir el archivo: {e}"));
             }
-            if widgets::icon_button(ui, icon::FOLDER_OPEN, "Mostrar en carpeta", true).clicked() {
-                if let Err(e) = DownloadManager::show_in_folder(&it.path) {
-                    env.shared
-                        .toast(&format!("No se pudo mostrar la carpeta: {e}"));
-                }
+            if widgets::icon_button(ui, icon::FOLDER_OPEN, "Mostrar en carpeta", true).clicked()
+                && let Err(e) = DownloadManager::show_in_folder(&it.path)
+            {
+                env.shared
+                    .toast(&format!("No se pudo mostrar la carpeta: {e}"));
             }
             if widgets::icon_button(ui, icon::TRASH, "Quitar de la lista", true).clicked() {
                 env.profile.downloads.remove(it.id);
