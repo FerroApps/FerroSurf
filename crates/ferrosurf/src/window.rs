@@ -49,6 +49,10 @@ pub enum AppCmd {
         allow: bool,
         always: bool,
     },
+    /// Download an extension package from a store page / link and install it.
+    InstallFromStore(crate::store::StoreItem),
+    /// Install a local `.zip` / `.xpi` / `.crx` file.
+    InstallExtensionFile(std::path::PathBuf),
 }
 
 /// References to app-wide state handed to window methods.
@@ -634,6 +638,11 @@ impl BrowserWindow {
             ShowDownloads => self.chrome.open_library(ui::LibraryTab::Downloads),
             ShowExtensions => self.chrome.open_settings(ui::SettingsPage::Extensions),
             ShowSettings => self.chrome.open_settings(ui::SettingsPage::Appearance),
+            ToggleAssistant if !env.profile.settings.assistant.enabled => {
+                self.chrome.assistant_open = false;
+                env.shared
+                    .toast("El asistente IA está desactivado (Ajustes → Asistente IA)");
+            }
             ToggleAssistant => {
                 self.chrome.assistant_open = !self.chrome.assistant_open;
                 if self.chrome.assistant_open {

@@ -2,7 +2,9 @@
 
 use egui::{Color32, Rect, RichText, Sense, Stroke, Ui, Vec2};
 use egui_phosphor::regular as icon;
-use ferrosurf_core::BookmarkNode;
+use ferrosurf_core::{BookmarkId, BookmarkNode};
+
+use super::library::BmDrag;
 
 use super::{LibraryTab, Palette, SettingsPage, widgets};
 use crate::actions::Action;
@@ -280,7 +282,9 @@ fn main_menu(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &mut Vec<C
         ui.separator();
         item(ui, icon::MAGNIFYING_GLASS, Action::Find, cmds);
         item(ui, icon::COMMAND, Action::CommandPalette, cmds);
-        item(ui, icon::SPARKLE, Action::ToggleAssistant, cmds);
+        if env.profile.settings.assistant.enabled {
+            item(ui, icon::SPARKLE, Action::ToggleAssistant, cmds);
+        }
         item(ui, icon::CAMERA, Action::Screenshot, cmds);
         ui.menu_button(format!("{}  Más herramientas", icon::WRENCH), |ui| {
             if menu_item(
@@ -336,24 +340,110 @@ fn main_menu(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &mut Vec<C
 }
 
 /// Bookmarks bar under the toolbar.
+/// Deferred edits requested from the bookmarks bar (applied after drawing).
+enum BarOp {
+    Move {
+        id: BookmarkId,
+        parent: BookmarkId,
+        index: Option<usize>,
+    },
+    NewFolder {
+        parent: BookmarkId,
+    },
+    AddCurrent {
+        parent: BookmarkId,
+    },
+    Remove(BookmarkId),
+    Rename(BookmarkId, String),
+}
+
+/// Bookmarks bar under the toolbar. Bookmarks and folders can be dragged to reorder,
+/// dropped in from the library panel, and folders created from the context menu.
 pub fn bookmarks_bar(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &mut Vec<Cmd>) {
     let pal = Palette::get(ui.ctx());
     let children: Vec<BookmarkNode> = env.profile.bookmarks.toolbar().children().to_vec();
-    ui.horizontal(|ui| {
+    let dragging = egui::DragAndDrop::payload::<BmDrag>(ui.ctx()).map(|p| p.0);
+    let mut ops: Vec<BarOp> = Vec::new();
+    let renaming = ui
+        .ctx()
+        .data(|d| d.get_temp::<(BookmarkId, String)>(egui::Id::new("bar-rename")));
+
+    let bar = ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
         ui.set_height(24.0);
         if children.is_empty() {
-            ui.label(
-                RichText::new(format!(
+            let hint = if dragging.is_some() {
+                format!(
+                    "{}  Suelta aquí para añadirlo a la barra",
+                    icon::DOWNLOAD_SIMPLE
+                )
+            } else {
+                format!(
                     "{}  Pulsa Ctrl+D o la estrella para guardar páginas aquí",
                     icon::STAR
-                ))
-                .small()
-                .color(pal.text_dim),
-            );
+                )
+            };
+            ui.label(RichText::new(hint).small().color(pal.text_dim));
         }
+        let mut item_rects: Vec<Rect> = Vec::with_capacity(children.len());
         for node in &children {
-            bookmark_bar_item(ui, node, cmds);
+            let resp = bookmark_bar_item(ui, node, &env.profile.favicons, cmds, &mut ops);
+            item_rects.push(resp.rect);
+        }
+        // Drop target: insertion point by pointer x among the items.
+        if let Some(id) = dragging
+            && let Some(pos) = ui.ctx().pointer_hover_pos()
+            && ui.max_rect().expand(4.0).contains(pos)
+        {
+            // Dropping on the middle of a folder moves into it.
+            let into_folder = children.iter().zip(&item_rects).find_map(|(n, r)| match n {
+                BookmarkNode::Folder { id: fid, .. }
+                    if *fid != id && r.shrink2(Vec2::new(r.width() * 0.25, 0.0)).contains(pos) =>
+                {
+                    Some((*fid, *r))
+                }
+                _ => None,
+            });
+            if let Some((fid, r)) = into_folder {
+                ui.painter().rect_stroke(
+                    r,
+                    6.0,
+                    Stroke::new(1.5, pal.accent),
+                    egui::StrokeKind::Inside,
+                );
+                if ui.input(|i| i.pointer.any_released()) {
+                    ops.push(BarOp::Move {
+                        id,
+                        parent: fid,
+                        index: None,
+                    });
+                }
+            } else {
+                let index = item_rects
+                    .iter()
+                    .position(|r| pos.x < r.center().x)
+                    .unwrap_or(item_rects.len());
+                let x = match (item_rects.get(index), item_rects.last()) {
+                    (Some(r), _) => r.left() - 1.0,
+                    (None, Some(last)) => last.right() + 1.0,
+                    (None, None) => ui.min_rect().left() + 2.0,
+                };
+                let r = ui.max_rect();
+                ui.painter().line_segment(
+                    [
+                        egui::pos2(x, r.top() + 2.0),
+                        egui::pos2(x, r.bottom() - 2.0),
+                    ],
+                    Stroke::new(2.0, pal.accent),
+                );
+                if ui.input(|i| i.pointer.any_released()) {
+                    ops.push(BarOp::Move {
+                        id,
+                        parent: ferrosurf_core::bookmarks::TOOLBAR_ID,
+                        index: Some(index),
+                    });
+                }
+            }
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let other = env.profile.bookmarks.other().children().to_vec();
@@ -376,41 +466,205 @@ pub fn bookmarks_bar(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &m
             }
         });
     });
-    let _ = w;
+    // Context menu on the empty part of the bar.
+    let current = w
+        .active_tab()
+        .map(|t| t.url_string())
+        .filter(|u| !u.is_empty());
+    bar.response.interact(Sense::click()).context_menu(|ui| {
+        if ui
+            .add_enabled(
+                current.is_some(),
+                egui::Button::new(format!("{}  Añadir página actual", icon::STAR)),
+            )
+            .clicked()
+        {
+            ops.push(BarOp::AddCurrent {
+                parent: ferrosurf_core::bookmarks::TOOLBAR_ID,
+            });
+            ui.close();
+        }
+        if ui
+            .button(format!("{}  Nueva carpeta", icon::FOLDER_PLUS))
+            .clicked()
+        {
+            ops.push(BarOp::NewFolder {
+                parent: ferrosurf_core::bookmarks::TOOLBAR_ID,
+            });
+            ui.close();
+        }
+        ui.separator();
+        if ui
+            .button(format!("{}  Gestionar marcadores", icon::BOOKMARKS_SIMPLE))
+            .clicked()
+        {
+            cmds.push(Cmd::Action(Action::ShowBookmarks));
+            ui.close();
+        }
+        if ui
+            .button(format!(
+                "{}  Ocultar la barra de marcadores",
+                icon::EYE_SLASH
+            ))
+            .clicked()
+        {
+            cmds.push(Cmd::Action(Action::ToggleBookmarksBar));
+            ui.close();
+        }
+    });
+
+    // Inline rename popup (new folders and "Renombrar").
+    if let Some((id, mut text)) = renaming {
+        let mut done = None;
+        egui::Area::new(egui::Id::new("bar-rename-area"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(bar.response.rect.left_bottom() + Vec2::new(8.0, 4.0))
+            .show(ui.ctx(), |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.label(RichText::new("Nombre de la carpeta").small());
+                    let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(220.0));
+                    r.request_focus();
+                    if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        done = Some(true);
+                    } else if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                        done = Some(false);
+                    }
+                    ui.horizontal(|ui| {
+                        if widgets::accent_button(ui, "Guardar").clicked() {
+                            done = Some(true);
+                        }
+                        if widgets::subtle_button(ui, "Cancelar").clicked() {
+                            done = Some(false);
+                        }
+                    });
+                });
+            });
+        match done {
+            Some(true) => {
+                ops.push(BarOp::Rename(id, text));
+                ui.ctx().data_mut(|d| {
+                    d.remove::<(BookmarkId, String)>(egui::Id::new("bar-rename"));
+                });
+            }
+            Some(false) => ui.ctx().data_mut(|d| {
+                d.remove::<(BookmarkId, String)>(egui::Id::new("bar-rename"));
+            }),
+            None => ui.ctx().data_mut(|d| {
+                d.insert_temp(egui::Id::new("bar-rename"), (id, text));
+            }),
+        }
+    }
+
+    for op in ops {
+        let res = match op {
+            BarOp::Move { id, parent, index } => {
+                // Moving within the same folder: account for the removed slot.
+                let mut index = index;
+                if let Some(ix) = index
+                    && let Some(old) = env
+                        .profile
+                        .bookmarks
+                        .toolbar()
+                        .children()
+                        .iter()
+                        .position(|n| n.id() == id)
+                    && parent == ferrosurf_core::bookmarks::TOOLBAR_ID
+                    && old < ix
+                {
+                    index = Some(ix - 1);
+                }
+                env.profile.bookmarks.move_to(id, parent, index)
+            }
+            BarOp::NewFolder { parent } => env
+                .profile
+                .bookmarks
+                .add_folder(parent, "Nueva carpeta")
+                .map(|id| {
+                    ui.ctx().data_mut(|d| {
+                        d.insert_temp(
+                            egui::Id::new("bar-rename"),
+                            (id, "Nueva carpeta".to_string()),
+                        )
+                    });
+                }),
+            BarOp::AddCurrent { parent } => match w.active_tab() {
+                Some(t) => env
+                    .profile
+                    .bookmarks
+                    .add(parent, &t.display_title(), &t.url_string())
+                    .map(|_| ()),
+                None => Ok(()),
+            },
+            BarOp::Remove(id) => env.profile.bookmarks.remove(id).map(|_| ()),
+            BarOp::Rename(id, title) => env.profile.bookmarks.rename(id, title.trim()),
+        };
+        if let Err(e) = res {
+            env.shared.toast(&format!("Marcadores: {e}"));
+        }
+    }
 }
 
-fn bookmark_bar_item(ui: &mut Ui, node: &BookmarkNode, cmds: &mut Vec<Cmd>) {
+/// One bookmark or folder in the bar. Returns its response (rect used for drops).
+fn bookmark_bar_item(
+    ui: &mut Ui,
+    node: &BookmarkNode,
+    favicons: &crate::favicons::FaviconStore,
+    cmds: &mut Vec<Cmd>,
+    ops: &mut Vec<BarOp>,
+) -> egui::Response {
+    let pal = Palette::get(ui.ctx());
+    let (glyph_folder, title) = match node {
+        BookmarkNode::Bookmark(b) => (false, b.title.chars().take(24).collect::<String>()),
+        BookmarkNode::Folder { title, .. } => (true, title.chars().take(24).collect::<String>()),
+    };
+    let text_w = ui.fonts_mut(|f| {
+        f.layout_no_wrap(
+            title.clone(),
+            egui::FontId::proportional(12.0),
+            Color32::WHITE,
+        )
+        .size()
+        .x
+    });
+    let (rect, resp) =
+        ui.allocate_exact_size(Vec2::new(text_w + 30.0, 24.0), Sense::click_and_drag());
+    let being_dragged =
+        egui::DragAndDrop::payload::<BmDrag>(ui.ctx()).is_some_and(|p| p.0 == node.id());
+    if resp.hovered() || being_dragged {
+        ui.painter().rect_filled(rect, 6.0, pal.tab_hover);
+    }
+    let icon_rect =
+        Rect::from_center_size(rect.left_center() + Vec2::new(12.0, 0.0), Vec2::splat(13.0));
     match node {
         BookmarkNode::Bookmark(b) => {
-            let title: String = b.title.chars().take(24).collect();
-            let (rect, resp) = {
-                let galley_w = ui.fonts_mut(|f| {
-                    f.layout_no_wrap(
-                        title.clone(),
-                        egui::FontId::proportional(12.0),
-                        Color32::WHITE,
-                    )
-                    .size()
-                    .x
-                });
-                ui.allocate_exact_size(Vec2::new(galley_w + 30.0, 24.0), Sense::click())
-            };
-            let pal = Palette::get(ui.ctx());
-            if resp.hovered() {
-                ui.painter().rect_filled(rect, 6.0, pal.tab_hover);
-            }
-            let icon_rect = Rect::from_center_size(
-                rect.left_center() + Vec2::new(12.0, 0.0),
-                Vec2::splat(13.0),
-            );
-            widgets::paint_site_icon(ui.painter(), icon_rect, None, &b.title, &b.url);
+            let tex = crate::favicons::texture(ui.ctx(), favicons, &b.url);
+            widgets::paint_site_icon(ui.painter(), icon_rect, tex.as_ref(), &b.title, &b.url)
+        }
+        BookmarkNode::Folder { .. } => {
             ui.painter().text(
-                rect.left_center() + Vec2::new(24.0, 0.0),
-                egui::Align2::LEFT_CENTER,
-                &title,
-                egui::FontId::proportional(12.0),
-                pal.text,
+                icon_rect.center(),
+                egui::Align2::CENTER_CENTER,
+                icon::FOLDER,
+                egui::FontId::proportional(13.0),
+                pal.text_dim,
             );
+        }
+    }
+    ui.painter().text(
+        rect.left_center() + Vec2::new(24.0, 0.0),
+        egui::Align2::LEFT_CENTER,
+        &title,
+        egui::FontId::proportional(12.0),
+        if being_dragged {
+            pal.text_dim
+        } else {
+            pal.text
+        },
+    );
+    resp.dnd_set_drag_payload(BmDrag(node.id()));
+    let id = node.id();
+    match node {
+        BookmarkNode::Bookmark(b) => {
             let url = b.url.clone();
             if resp.clicked() {
                 let mods = ui.input(|i| i.modifiers);
@@ -433,9 +687,15 @@ fn bookmark_bar_item(ui: &mut Ui, node: &BookmarkNode, cmds: &mut Vec<Cmd>) {
                     disposition: Disposition::NewBackgroundTab,
                 });
             }
-            resp.on_hover_text(format!("{}\n{}", b.title, b.url))
+            resp.clone()
+                .on_hover_text(format!("{}\n{}", b.title, b.url))
                 .context_menu(|ui| {
-                    if ui.button("Abrir en una pestaña nueva").clicked()
+                    if ui
+                        .button(format!(
+                            "{}  Abrir en una pestaña nueva",
+                            icon::ARROW_SQUARE_OUT
+                        ))
+                        .clicked()
                         && let Ok(u) = url::Url::parse(&url)
                     {
                         cmds.push(Cmd::OpenUrl {
@@ -443,55 +703,108 @@ fn bookmark_bar_item(ui: &mut Ui, node: &BookmarkNode, cmds: &mut Vec<Cmd>) {
                             disposition: Disposition::NewForegroundTab,
                         });
                     }
-                    if ui.button("Copiar enlace").clicked() {
+                    if ui
+                        .button(format!("{}  Copiar enlace", icon::LINK))
+                        .clicked()
+                    {
                         ui.ctx().copy_text(url.clone());
                     }
-                    if ui.button("Gestionar marcadores…").clicked() {
+                    if ui
+                        .button(format!("{}  Editar…", icon::PENCIL_SIMPLE))
+                        .clicked()
+                    {
                         cmds.push(Cmd::Action(Action::ShowBookmarks));
+                    }
+                    ui.separator();
+                    if ui
+                        .button(format!("{}  Nueva carpeta", icon::FOLDER_PLUS))
+                        .clicked()
+                    {
+                        ops.push(BarOp::NewFolder {
+                            parent: ferrosurf_core::bookmarks::TOOLBAR_ID,
+                        });
+                    }
+                    if ui.button(format!("{}  Eliminar", icon::TRASH)).clicked() {
+                        ops.push(BarOp::Remove(id));
                     }
                 });
         }
         BookmarkNode::Folder {
             title, children, ..
         } => {
-            let resp = ui.add(
-                egui::Button::new(RichText::new(format!("{}  {}", icon::FOLDER, title)).size(12.0))
-                    .fill(Color32::TRANSPARENT),
-            );
-            egui::Popup::menu(&resp).show(|ui| {
-                egui::ScrollArea::vertical()
-                    .max_height(480.0)
-                    .show(ui, |ui| {
-                        if children.is_empty() {
-                            ui.label(RichText::new("(vacía)").weak());
-                        }
-                        for c in children {
-                            folder_menu_item(ui, c, cmds);
-                        }
-                        let urls: Vec<String> = children
-                            .iter()
-                            .filter_map(|c| match c {
-                                BookmarkNode::Bookmark(b) => Some(b.url.clone()),
-                                _ => None,
-                            })
-                            .collect();
-                        if urls.len() > 1 {
-                            ui.separator();
-                            if ui.button(format!("Abrir todos ({})", urls.len())).clicked() {
-                                for u in urls {
-                                    if let Ok(u) = url::Url::parse(&u) {
-                                        cmds.push(Cmd::OpenUrl {
-                                            url: u,
-                                            disposition: Disposition::NewBackgroundTab,
-                                        });
+            let _ = glyph_folder;
+            let popup_id = egui::Id::new(("bar-folder", id));
+            if resp.clicked() {
+                egui::Popup::toggle_id(ui.ctx(), popup_id);
+            }
+            egui::Popup::from_response(&resp)
+                .id(popup_id)
+                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                .show(|ui| {
+                    egui::ScrollArea::vertical()
+                        .max_height(480.0)
+                        .show(ui, |ui| {
+                            if children.is_empty() {
+                                ui.label(RichText::new("(vacía)").weak());
+                            }
+                            for c in children {
+                                folder_menu_item(ui, c, cmds);
+                            }
+                            let urls: Vec<String> = children
+                                .iter()
+                                .filter_map(|c| match c {
+                                    BookmarkNode::Bookmark(b) => Some(b.url.clone()),
+                                    _ => None,
+                                })
+                                .collect();
+                            if urls.len() > 1 {
+                                ui.separator();
+                                if ui.button(format!("Abrir todos ({})", urls.len())).clicked() {
+                                    for u in urls {
+                                        if let Ok(u) = url::Url::parse(&u) {
+                                            cmds.push(Cmd::OpenUrl {
+                                                url: u,
+                                                disposition: Disposition::NewBackgroundTab,
+                                            });
+                                        }
                                     }
                                 }
                             }
-                        }
+                        });
+                });
+            let title = title.clone();
+            resp.clone().context_menu(|ui| {
+                if ui
+                    .button(format!("{}  Nueva carpeta dentro", icon::FOLDER_PLUS))
+                    .clicked()
+                {
+                    ops.push(BarOp::NewFolder { parent: id });
+                }
+                if ui
+                    .button(format!("{}  Añadir página actual aquí", icon::STAR))
+                    .clicked()
+                {
+                    ops.push(BarOp::AddCurrent { parent: id });
+                }
+                if ui
+                    .button(format!("{}  Renombrar", icon::PENCIL_SIMPLE))
+                    .clicked()
+                {
+                    ui.ctx().data_mut(|d| {
+                        d.insert_temp(egui::Id::new("bar-rename"), (id, title.clone()))
                     });
+                }
+                ui.separator();
+                if ui
+                    .button(format!("{}  Eliminar carpeta", icon::TRASH))
+                    .clicked()
+                {
+                    ops.push(BarOp::Remove(id));
+                }
             });
         }
     }
+    resp
 }
 
 fn folder_menu_item(ui: &mut Ui, node: &BookmarkNode, cmds: &mut Vec<Cmd>) {

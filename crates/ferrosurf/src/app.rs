@@ -508,6 +508,11 @@ impl Running {
             .map(|e| (e.id.clone(), e.root.clone()))
             .collect();
         ctx.newtab_override = self.profile.extensions.newtab_override();
+        ctx.favicon_dir = Some(self.profile.favicons.dir().to_path_buf());
+        ctx.assistant_enabled = self.profile.settings.assistant.enabled;
+        for (_, url) in ctx.top_sites.iter().chain(ctx.bookmarks.iter()) {
+            self.profile.favicons.ensure(url);
+        }
     }
 
     /// Re-install extension content scripts when extensions change.
@@ -721,6 +726,21 @@ impl Running {
                             egui::TextureOptions::LINEAR,
                         )
                     });
+                    if let (Some(img), Some(u)) =
+                        (wv.favicon().and_then(|i| favicon_image(&i)), wv.url())
+                    {
+                        let bytes: Vec<u8> = img
+                            .pixels
+                            .iter()
+                            .flat_map(|c| c.to_srgba_unmultiplied())
+                            .collect();
+                        self.profile.favicons.store_rgba(
+                            u.as_str(),
+                            img.size[0] as u32,
+                            img.size[1] as u32,
+                            &bytes,
+                        );
+                    }
                     self.windows[wi].tabs[ti].favicon = tex;
                     self.windows[wi].window.request_redraw();
                 }
@@ -901,6 +921,18 @@ impl Running {
                 self.with_window(wi, |w, env| w.run_action(env, a));
                 return;
             }
+        }
+        // Extension packages: install instead of downloading.
+        if matches!(
+            crate::store::detect(&url),
+            Some(crate::store::StoreItem::Direct { .. })
+        ) {
+            request.deny();
+            self.pending_app_cmds
+                .push(AppCmd::InstallFromStore(crate::store::StoreItem::Direct {
+                    url: url.clone(),
+                }));
+            return;
         }
         // Likely downloads (Servo can't render these).
         if is_download_url(&url) {
@@ -1112,11 +1144,100 @@ impl Running {
                 }
                 self.request_redraw_all();
             }
+            AppCmd::InstallFromStore(item) => {
+                let label = match &item {
+                    crate::store::StoreItem::Chrome { id } => id.clone(),
+                    crate::store::StoreItem::Firefox { slug } => slug.clone(),
+                    crate::store::StoreItem::Direct { url } => url.to_string(),
+                };
+                if !self.profile.store_busy.contains(&label) {
+                    self.profile.store_busy.push(label.clone());
+                    self.shared.toast(&format!(
+                        "Descargando la extensión desde {}…",
+                        item.store_name()
+                    ));
+                    let results = self.profile.store_results.clone();
+                    let wake = self.shared.wake.clone();
+                    std::thread::spawn(move || {
+                        let res = crate::store::download(&item).map_err(|e| format!("{e:#}"));
+                        results.lock().push((label, res));
+                        if let Some(wake) = wake {
+                            wake();
+                        }
+                    });
+                }
+                self.request_redraw_all();
+            }
+            AppCmd::InstallExtensionFile(path) => self.install_extension_file(&path, None),
             AppCmd::ReconnectMcpClients => self.mcp.connect_clients(&self.runtime, &self.profile),
             AppCmd::RestartMcpServer => {
                 self.mcp.restart_server(&self.runtime, &mut self.profile);
                 self.shared.mcp_url = self.mcp.url();
                 self.refresh_page_context();
+            }
+        }
+    }
+
+    /// Install a downloaded/picked extension package and report the result.
+    fn install_extension_file(&mut self, path: &std::path::Path, label: Option<&str>) {
+        // A malformed archive must never take the browser down.
+        let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.profile.extensions.install_from_archive(path)
+        }));
+        match res {
+            Ok(Ok(id)) => {
+                let (name, notes) = match self.profile.extensions.get(&id) {
+                    Some(ext) => {
+                        let raw: serde_json::Value = std::fs::read(ext.root.join("manifest.json"))
+                            .ok()
+                            .and_then(|b| serde_json::from_slice(&b).ok())
+                            .unwrap_or_default();
+                        (
+                            ext.manifest.name.clone(),
+                            crate::store::unsupported_features(&ext.manifest, &raw),
+                        )
+                    }
+                    None => (id.clone(), Vec::new()),
+                };
+                if notes.is_empty() {
+                    self.shared.toast(&format!(
+                        "🧩 «{name}» instalada. Recarga las páginas para activarla."
+                    ));
+                } else {
+                    self.shared.toast(&format!(
+                        "🧩 «{name}» instalada. Funcionan sus scripts de página y reglas de red; aún no: {}.",
+                        notes.join(", ")
+                    ));
+                }
+                self.sync_extensions();
+            }
+            Ok(Err(e)) => self
+                .shared
+                .toast(&format!("No se pudo instalar la extensión: {e:#}")),
+            Err(_) => self
+                .shared
+                .toast("No se pudo instalar la extensión: el archivo está dañado"),
+        }
+        if let Some(label) = label {
+            self.profile.store_busy.retain(|l| l != label);
+        }
+        self.request_redraw_all();
+    }
+
+    fn poll_store_installs(&mut self) {
+        let done: Vec<_> = std::mem::take(&mut *self.profile.store_results.lock());
+        for (label, res) in done {
+            match res {
+                Ok(path) => {
+                    self.install_extension_file(&path, Some(&label));
+                    let _ = std::fs::remove_file(&path);
+                }
+                Err(e) => {
+                    self.profile.store_busy.retain(|l| *l != label);
+                    self.shared
+                        .toast(&format!("No se pudo descargar la extensión: {e}"));
+                    self.request_redraw_all();
+                }
             }
         }
     }
@@ -1526,6 +1647,7 @@ impl ApplicationHandler<AppEvent> for App {
         state.servo.spin_event_loop();
         state.process_engine_events(event_loop);
         state.process_mcp_commands();
+        state.poll_store_installs();
         if state.mcp.poll_assistant(&mut state.shared) || state.profile.downloads.active_count() > 0
         {
             state.request_redraw_all();

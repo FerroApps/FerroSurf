@@ -5,10 +5,12 @@
 mod actions;
 mod app;
 mod delegate;
+mod favicons;
 mod input;
 mod internal_pages;
 mod mcp_host;
 mod profile_data;
+mod store;
 mod tab;
 mod ui;
 mod window;

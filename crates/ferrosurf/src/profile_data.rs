@@ -23,6 +23,14 @@ pub struct ProfileData {
     /// which runs on the UI thread, but we keep it in an Arc for cheap snapshots).
     pub blocker: Arc<parking_lot::RwLock<Blocker>>,
     pub closed_tabs: ClosedTabs,
+    pub favicons: crate::favicons::FaviconStore,
+    /// Extension packages being downloaded from a store: (label, result).
+    pub store_results:
+        std::sync::Arc<parking_lot::Mutex<Vec<(String, Result<std::path::PathBuf, String>)>>>,
+    /// Labels of store installs in progress.
+    pub store_busy: Vec<String>,
+    /// Store pages whose install bar the user dismissed.
+    pub store_dismissed: std::collections::HashSet<String>,
     pub profiles: RefCell<ProfileManager>,
     settings_dirty: bool,
 }
@@ -40,6 +48,8 @@ impl ProfileData {
         let mut history = History::open(&paths.history())?;
         history.set_enabled(!profile.ephemeral && settings.privacy.remember_history);
         let permissions = PermissionStore::open(paths.permissions());
+        let favicons =
+            crate::favicons::FaviconStore::new(paths.root.join("favicons"), Some(wake.clone()));
         let downloads = DownloadManager::new(Some(paths.downloads()), wake);
         let extensions = ExtensionManager::open(paths.extensions())?;
         let mut data = Self {
@@ -53,6 +63,10 @@ impl ProfileData {
             extensions,
             blocker: Arc::new(parking_lot::RwLock::new(Blocker::new())),
             closed_tabs: ClosedTabs::default(),
+            favicons,
+            store_results: Default::default(),
+            store_busy: Vec::new(),
+            store_dismissed: Default::default(),
             profiles: RefCell::new(profiles),
             settings_dirty: false,
         };
