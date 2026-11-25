@@ -10,7 +10,8 @@
 set -euo pipefail
 
 # Every workspace crate shares the [workspace.package] version.
-PKGS="${PKGS:-ferrosurf ferrosurf-core ferrosurf-extensions ferrosurf-mcp}"
+# Every workspace crate inherits the workspace version, so bump all of them in Cargo.lock.
+PKGS="${PKGS:-$(sed -n 's/^name = "\(.*\)"$/\1/p' crates/*/Cargo.toml | tr '\n' ' ')}"
 
 current() {
   grep -m1 '^version = ' Cargo.toml | sed -E 's/version = "(.*)"/\1/'

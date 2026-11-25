@@ -2410,7 +2410,7 @@ dependencies = [
 
 [[package]]
 name = "ferrosurf-passwords"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -2429,7 +2429,7 @@ dependencies = [
 
 [[package]]
 name = "ferrosurf-plugin-sdk"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "rmp-serde",
  "serde",
@@ -2438,7 +2438,7 @@ dependencies = [
 
 [[package]]
 name = "ferrosurf-plugins"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "ferrosurf-extensions",
  "ferrosurf-mcp",
