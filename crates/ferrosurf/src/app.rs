@@ -528,8 +528,8 @@ impl Running {
                     tab.url = Some(url.clone());
                     tab.omnibox_edit = None;
                     let typed = std::mem::take(&mut tab.typed_navigation);
-                    let title = tab.title.clone();
-                    let _ = self.profile.history.record_visit(url.as_str(), &title, typed);
+                    // The title arrives separately (TitleChanged / load complete).
+                    let _ = self.profile.history.record_visit(url.as_str(), "", typed);
                     // Per-site zoom.
                     if let Some(host) = url.host_str() {
                         let z = self.profile.settings.zoom_for_host(host);
@@ -547,7 +547,13 @@ impl Running {
                     let tab = &mut self.windows[wi].tabs[ti];
                     tab.title = title.unwrap_or_default();
                     if let Some(u) = &tab.url {
-                        let _ = self.profile.history.update_title(u.as_str(), &tab.title);
+                        if tab.title == "Error loading page" {
+                            // Servo's network error page: don't keep failed loads in history.
+                            tab.title = "No se pudo cargar la página".into();
+                            let _ = self.profile.history.delete_url(u.as_str());
+                        } else {
+                            let _ = self.profile.history.update_title(u.as_str(), &tab.title);
+                        }
                     }
                     self.windows[wi].window.request_redraw();
                 }
@@ -571,6 +577,10 @@ impl Running {
                     tab.can_go_forward = wv.can_go_forward();
                     if status == LoadStatus::Complete {
                         tab.load_progress_start = None;
+                        if let (Some(u), Some(t)) = (wv.url(), wv.page_title().filter(|t| t != "Error loading page")) {
+                            tab.title = t.clone();
+                            let _ = self.profile.history.update_title(u.as_str(), &t);
+                        }
                         let tab_id = tab.id;
                         self.mcp.on_load_complete(tab_id);
                         if let Some(job) = &mut self.screenshot {

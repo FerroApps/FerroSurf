@@ -158,10 +158,14 @@ pub fn show_all(ctx: &egui::Context, w: &mut BrowserWindow, env: &mut Env, cmds:
                                 }
                                 ui.separator();
                             }
+                            let mut last_sep = true;
                             for item in &items {
                                 match item {
                                     ContextMenuItem::Separator => {
-                                        ui.separator();
+                                        if !last_sep {
+                                            ui.separator();
+                                        }
+                                        last_sep = true;
                                     },
                                     ContextMenuItem::Item { label, action, enabled } => {
                                         if matches!(action, ContextMenuAction::OpenLinkInNewWebView | ContextMenuAction::CopyLink | ContextMenuAction::CopyImageLink | ContextMenuAction::OpenImageInNewView) {
@@ -177,6 +181,7 @@ pub fn show_all(ctx: &egui::Context, w: &mut BrowserWindow, env: &mut Env, cmds:
                                             ContextMenuAction::SelectAll => icon::SELECTION_ALL,
                                             _ => " ",
                                         };
+                                        last_sep = false;
                                         let label = spanish_label(action).unwrap_or(label.as_str()).to_string();
                                         if ui.add_enabled(*enabled, egui::Button::new(format!("{glyph}  {label}"))).clicked() {
                                             choice = Some(*action);

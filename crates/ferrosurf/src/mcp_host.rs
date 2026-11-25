@@ -269,7 +269,13 @@ pub fn js_to_json(v: servo::JSValue) -> serde_json::Value {
     match v {
         servo::JSValue::Undefined | servo::JSValue::Null => Value::Null,
         servo::JSValue::Boolean(b) => Value::Bool(b),
-        servo::JSValue::Number(n) => serde_json::Number::from_f64(n).map(Value::Number).unwrap_or(Value::Null),
+        servo::JSValue::Number(n) => {
+            if n.fract() == 0.0 && n.abs() < 9.0e15 {
+                Value::from(n as i64)
+            } else {
+                serde_json::Number::from_f64(n).map(Value::Number).unwrap_or(Value::Null)
+            }
+        },
         servo::JSValue::String(s) => Value::String(s),
         servo::JSValue::Element(s) => serde_json::json!({"element": s}),
         servo::JSValue::ShadowRoot(s) => serde_json::json!({"shadowRoot": s}),

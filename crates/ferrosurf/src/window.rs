@@ -234,8 +234,7 @@ impl BrowserWindow {
 
     fn configure_webview(&self, env: &Env, webview: &WebView) {
         webview.resize(self.content_size());
-        let dark = ui::theme::is_dark(env.profile, self.window.theme());
-        let web_dark = env.profile.settings.appearance.web_dark_mode || dark;
+        let web_dark = env.profile.settings.appearance.web_dark_mode;
         webview.notify_theme_change(if web_dark { servo::Theme::Dark } else { servo::Theme::Light });
     }
 
@@ -842,7 +841,7 @@ impl BrowserWindow {
             WindowEvent::MouseInput { state, button, .. } => {
                 if let (Some(pos), Some(b)) = (self.cursor_px, crate::input::mouse_button(*button)) {
                     let p = egui::pos2(pos.x as f32, pos.y as f32);
-                    if self.content_rect_px.contains(p) && !self.chrome.blocks_content_at(&self.egui_ctx, p, self.scale()) && !response.consumed {
+                    if self.content_rect_px.contains(p) && !self.chrome.blocks_content_at(&self.egui_ctx, p, self.scale()) {
                         let local = p - self.content_rect_px.min;
                         let pressed = *state == ElementState::Pressed;
                         if pressed {
