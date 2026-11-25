@@ -47,8 +47,19 @@ impl EventLoopWaker for Waker {
 
 pub fn run(cli: Cli) -> anyhow::Result<()> {
     let event_loop = EventLoop::<AppEvent>::with_user_event().build()?;
+    // The tokio runtime is entered on the UI thread for the whole run: native file
+    // dialogs (rfd over the XDG portal, via zbus on tokio) need a reactor there.
+    let runtime = Arc::new(
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .thread_name("ferrosurf-rt")
+            .enable_all()
+            .build()?,
+    );
+    let _runtime_guard = runtime.enter();
     let mut app = App {
         cli,
+        runtime: runtime.clone(),
         proxy: event_loop.create_proxy(),
         state: None,
         failed: None,
@@ -62,6 +73,7 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
 
 pub struct App {
     cli: Cli,
+    runtime: Arc<tokio::runtime::Runtime>,
     proxy: EventLoopProxy<AppEvent>,
     state: Option<Running>,
     failed: Option<anyhow::Error>,
@@ -78,7 +90,7 @@ struct Running {
     keymap_rev: u64,
     page_ctx: SharedPageContext,
     shared: SharedUi,
-    runtime: tokio::runtime::Runtime,
+    runtime: Arc<tokio::runtime::Runtime>,
     mcp: McpHost,
     user_scripts: Vec<Rc<UserScript>>,
     ext_revision: u64,
@@ -257,11 +269,7 @@ impl App {
         servo.set_delegate(delegate.clone());
         let ucm = Rc::new(UserContentManager::new(&servo));
 
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(2)
-            .thread_name("ferrosurf-rt")
-            .enable_all()
-            .build()?;
+        let runtime = self.runtime.clone();
         let mcp = McpHost::start(&runtime, &mut profile_data, wake.clone());
 
         let keymap = Keymap::new(&profile_data.settings.keybindings);
@@ -844,8 +852,15 @@ impl Running {
                 self.shared.toast(&format!("🔔 {} — {}", n.title, n.body));
                 self.request_redraw_all();
             }
-            EngineEvent::Console(_, level, msg) => {
+            EngineEvent::Console(wv, level, msg) => {
                 log::debug!(target: "console", "[{level:?}] {msg}");
+                if let Some((wi, ti)) = wv.as_ref().and_then(|w| self.find_webview(w)) {
+                    let level = format!("{level:?}").to_lowercase();
+                    self.windows[wi].tabs[ti].push_console(&level, msg);
+                    if self.windows[wi].chrome.devtools_open {
+                        self.windows[wi].window.request_redraw();
+                    }
+                }
             }
             EngineEvent::ResizeTo(_) => {}
             EngineEvent::DevtoolsStarted(port, token) => {
@@ -927,6 +942,21 @@ impl Running {
             initiator: initiator.as_ref(),
             resource_type,
         });
+        if let Some((wi, ti)) = wv.as_ref().and_then(|w| self.find_webview(w)) {
+            let tab = &mut self.windows[wi].tabs[ti];
+            if req.is_for_main_frame && resource_type == ResourceType::MainFrame {
+                tab.network.clear();
+                tab.console.clear();
+            }
+            tab.push_network(crate::tab::NetEntry {
+                url: url.to_string(),
+                method: req.method.to_string(),
+                kind: format!("{resource_type:?}").to_lowercase(),
+                main_frame: req.is_for_main_frame,
+                blocked: matches!(decision, BlockDecision::Block),
+                time: std::time::SystemTime::now(),
+            });
+        }
         match decision {
             BlockDecision::Block => {
                 log::debug!("Blocked {url}");

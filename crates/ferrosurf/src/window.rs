@@ -103,6 +103,11 @@ pub enum Cmd {
         url: Url,
     },
     EvalInActive(String),
+    /// Evaluate JS in the active tab and store the JSON result (or error) in `slot`.
+    DevtoolsEval {
+        script: String,
+        slot: crate::ui::devtools::EvalSlot,
+    },
     App(AppCmd),
 }
 
@@ -680,16 +685,7 @@ impl BrowserWindow {
             }
             ClearBrowsingData => self.chrome.open_settings(ui::SettingsPage::Privacy),
             DevTools => {
-                if env.profile.settings.enable_devtools {
-                    env.shared.toast(&format!(
-                        "Servidor de DevTools en el puerto {}. Conéctalo desde Firefox: about:debugging → Configurar → localhost:{}",
-                        env.profile.settings.devtools_port, env.profile.settings.devtools_port
-                    ));
-                } else {
-                    self.chrome.open_settings(ui::SettingsPage::Advanced);
-                    env.shared
-                        .toast("Activa las herramientas de desarrollo en Ajustes → Avanzado");
-                }
+                self.chrome.devtools_open = !self.chrome.devtools_open;
             }
             Screenshot => self.screenshot_requested = true,
             ViewSource => {
@@ -823,6 +819,21 @@ impl BrowserWindow {
                     w.evaluate_javascript(js, |_| {});
                 }
             }
+            Cmd::DevtoolsEval { script, slot } => match self.active_webview() {
+                Some(w) => {
+                    let wake = env.shared.wake.clone();
+                    w.evaluate_javascript(script, move |res| {
+                        *slot.lock() = Some(match res {
+                            Ok(v) => Ok(crate::mcp_host::js_to_json(v)),
+                            Err(e) => Err(format!("{e:?}")),
+                        });
+                        if let Some(wake) = wake {
+                            wake();
+                        }
+                    });
+                }
+                None => *slot.lock() = Some(Err("No hay ninguna página cargada".into())),
+            },
             Cmd::App(c) => env.app_cmds.push(c),
         }
         self.needs_redraw = true;

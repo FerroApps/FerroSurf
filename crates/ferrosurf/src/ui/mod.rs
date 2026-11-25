@@ -1,6 +1,7 @@
 //! The browser chrome, drawn with egui around (and on top of) the Servo content area.
 
 pub mod assistant;
+pub mod devtools;
 pub mod dialogs;
 pub mod find;
 pub mod library;
@@ -144,6 +145,8 @@ pub struct Chrome {
     pub settings: Option<SettingsPage>,
     pub settings_state: settings::SettingsState,
     pub assistant_open: bool,
+    pub devtools_open: bool,
+    pub devtools: devtools::DevtoolsState,
     pub palette: palette::Palette,
     pub permission_prompts: Vec<PermissionPrompt>,
     pub auth_prompts: Vec<AuthPrompt>,
@@ -327,6 +330,19 @@ pub fn draw(
                 )
                 .show(root, |ui| library::panel(ui, tab, w, env, cmds));
         }
+    }
+
+    if w.chrome.devtools_open && !fullscreen_content {
+        egui::Panel::bottom("devtools")
+            .resizable(true)
+            .default_size(300.0)
+            .size_range(140.0..=900.0)
+            .frame(
+                egui::Frame::new()
+                    .fill(pal.toolbar)
+                    .inner_margin(egui::Margin::same(0)),
+            )
+            .show(root, |ui| devtools::panel(ui, w, env, cmds));
     }
 
     // Content area: the Servo framebuffer is blitted here.

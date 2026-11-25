@@ -98,11 +98,11 @@ pub fn wheel(delta: MouseScrollDelta, x: f32, y: f32) -> InputEvent {
         ),
         MouseScrollDelta::PixelDelta(d) => (d.x, d.y, WheelMode::DeltaPixel),
     };
-    // Servo expects DOM-style deltas: positive = scroll down/right.
+    // winit and Servo use the same sign convention here (verified on X11 and Wayland).
     InputEvent::Wheel(WheelEvent::new(
         WheelDelta {
-            x: -dx,
-            y: -dy,
+            x: dx,
+            y: dy,
             z: 0.0,
             mode,
         },
