@@ -4,6 +4,7 @@
 
 mod actions;
 mod app;
+mod bridge;
 mod delegate;
 mod favicons;
 mod input;

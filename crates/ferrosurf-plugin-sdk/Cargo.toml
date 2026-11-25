@@ -1,0 +1,20 @@
+[package]
+name = "ferrosurf-plugin-sdk"
+description = "SDK and ABI types for FerroSurf WebAssembly plugins"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[features]
+default = ["guest"]
+# Plugin-side helpers: the `Plugin` trait, `register_plugin!` and host call
+# wrappers. The app depends on the crate without it, for the ABI types only.
+guest = []
+
+[dependencies]
+serde.workspace = true
+# MessagePack: the wire format of every hook and host call.
+rmp-serde = "1"
+# Byte fields (KV values, HTTP bodies) as MessagePack `bin`, not arrays.
+serde_bytes = "0.11"

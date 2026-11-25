@@ -64,7 +64,14 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
         state: None,
         failed: None,
     };
-    event_loop.run_app(&mut app)?;
+    let result = event_loop.run_app(&mut app);
+    // The event loop (and with it the Wayland/X11 connection) is gone now. Anything still
+    // holding windowing resources must not run its destructor: on Wayland the clipboard
+    // worker would touch a dead connection and crash. The process is exiting anyway.
+    if let Some(state) = app.state.take() {
+        std::mem::forget(state);
+    }
+    result?;
     if let Some(e) = app.failed {
         return Err(e);
     }
@@ -100,6 +107,9 @@ struct Running {
     screenshot: Option<ScreenshotJob>,
     quitting: bool,
     pending_app_cmds: Vec<AppCmd>,
+    /// Bridge prompts waiting for an asynchronous answer.
+    bridge_pending: Vec<(servo::PromptDialog, std::sync::mpsc::Receiver<Result<serde_json::Value, String>>)>,
+    bridge_script: Option<Rc<UserScript>>,
 }
 
 struct ScreenshotJob {
@@ -299,6 +309,8 @@ impl App {
             }),
             quitting: false,
             pending_app_cmds: Vec::new(),
+            bridge_pending: Vec::new(),
+            bridge_script: None,
         };
         running.shared.wake = Some(wake);
         running.shared.mcp_url = running.mcp.url();
@@ -522,6 +534,11 @@ impl Running {
             return;
         }
         self.ext_revision = rev;
+        if self.bridge_script.is_none() {
+            let script = Rc::new(UserScript::new(crate::bridge::CLIENT_JS.to_string(), None));
+            self.ucm.add_script(script.clone());
+            self.bridge_script = Some(script);
+        }
         for s in self.user_scripts.drain(..) {
             self.ucm.remove_script(s);
         }
@@ -854,6 +871,16 @@ impl Running {
                             }
                         }
                         EmbedderControl::InputMethod(_) => {}
+                        EmbedderControl::SimpleDialog(servo::SimpleDialog::Prompt(prompt))
+                            if prompt.message().starts_with(crate::bridge::PREFIX) =>
+                        {
+                            let origin = self.windows[wi].tabs[ti]
+                                .url
+                                .as_ref()
+                                .map(ferrosurf_core::permissions::PermissionStore::origin_of)
+                                .unwrap_or_default();
+                            self.handle_bridge(prompt, origin, tab);
+                        }
                         other => {
                             self.windows[wi].controls.push((tab, other));
                             self.windows[wi].window.request_redraw();
@@ -1222,6 +1249,53 @@ impl Running {
             self.profile.store_busy.retain(|l| l != label);
         }
         self.request_redraw_all();
+    }
+
+    /// Answer a bridge call from a page/injected script (see `bridge.rs`).
+    fn handle_bridge(&mut self, mut prompt: servo::PromptDialog, origin: String, tab: TabId) {
+        let reply = match crate::bridge::parse(prompt.message()) {
+            Some(Ok(call)) => self.route_bridge(call, &origin, tab),
+            Some(Err(e)) => crate::bridge::Reply::Now(serde_json::json!({ "__error": e })),
+            None => return,
+        };
+        match reply {
+            crate::bridge::Reply::Now(v) => {
+                prompt.set_current_value(&v.to_string());
+                prompt.confirm();
+            },
+            crate::bridge::Reply::Later(rx) => self.bridge_pending.push((prompt, rx)),
+        }
+    }
+
+    fn route_bridge(&mut self, call: crate::bridge::BridgeCall, origin: &str, _tab: TabId) -> crate::bridge::Reply {
+        use crate::bridge::Reply;
+        match call.channel.as_str() {
+            "ping" => Reply::Now(serde_json::json!({ "pong": true, "origin": origin, "version": env!("CARGO_PKG_VERSION") })),
+            other => Reply::Now(serde_json::json!({ "__error": format!("canal desconocido: {other}") })),
+        }
+    }
+
+    fn poll_bridge(&mut self) {
+        let mut i = 0;
+        while i < self.bridge_pending.len() {
+            match self.bridge_pending[i].1.try_recv() {
+                Ok(res) => {
+                    let (mut prompt, _) = self.bridge_pending.remove(i);
+                    let text = match res {
+                        Ok(v) => v.to_string(),
+                        Err(e) => crate::bridge::error(e),
+                    };
+                    prompt.set_current_value(&text);
+                    prompt.confirm();
+                },
+                Err(std::sync::mpsc::TryRecvError::Empty) => i += 1,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    let (mut prompt, _) = self.bridge_pending.remove(i);
+                    prompt.set_current_value(&crate::bridge::error("cancelado"));
+                    prompt.confirm();
+                },
+            }
+        }
     }
 
     fn poll_store_installs(&mut self) {
@@ -1648,6 +1722,7 @@ impl ApplicationHandler<AppEvent> for App {
         state.process_engine_events(event_loop);
         state.process_mcp_commands();
         state.poll_store_installs();
+        state.poll_bridge();
         if state.mcp.poll_assistant(&mut state.shared) || state.profile.downloads.active_count() > 0
         {
             state.request_redraw_all();

@@ -1,6 +1,8 @@
 [workspace]
 resolver = "2"
 members = ["crates/*"]
+# Plugin examples build for wasm32 in their own workspace.
+exclude = ["examples"]
 default-members = ["crates/ferrosurf"]
 
 [workspace.package]

@@ -67,12 +67,17 @@ pub fn find_bar(ctx: &egui::Context, w: &mut BrowserWindow, cmds: &mut Vec<Cmd>)
     let pal = Palette::get(ctx);
     let content = w.content_rect_px;
     let ppp = ctx.pixels_per_point();
-    let pos = egui::pos2(content.right() / ppp - 380.0, content.top() / ppp + 8.0);
+    let t = super::widgets::fade(ctx, Id::new("find-bar-anim"), true, 0.18);
+    let pos = egui::pos2(
+        content.right() / ppp - 380.0,
+        content.top() / ppp + 8.0 - (1.0 - t) * 10.0,
+    );
     let mut close = false;
     let area = egui::Area::new(Id::new("find-bar"))
         .order(egui::Order::Foreground)
         .fixed_pos(pos)
         .show(ctx, |ui| {
+            ui.set_opacity(t);
             egui::Frame::new()
                 .fill(pal.toolbar)
                 .stroke(egui::Stroke::new(1.0, pal.border))
@@ -147,4 +152,9 @@ pub fn find_bar(ctx: &egui::Context, w: &mut BrowserWindow, cmds: &mut Vec<Cmd>)
         w.chrome.find.result.clear();
         cmds.push(Cmd::ClearFind);
     }
+}
+
+/// Called while the bar is closed so the next opening animates from zero again.
+pub fn reset_anim(ctx: &egui::Context) {
+    ctx.animate_bool_with_time(Id::new("find-bar-anim"), false, 0.0);
 }

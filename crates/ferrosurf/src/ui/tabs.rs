@@ -1,6 +1,6 @@
 //! Tab strip (horizontal) and tab sidebar (vertical).
 
-use egui::{Color32, Pos2, Rect, Sense, Stroke, Ui, Vec2};
+use egui::{Color32, Id, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 use egui_phosphor::regular as icon;
 
 use super::{Palette, widgets};
@@ -98,25 +98,87 @@ fn tab_context_menu(ui: &mut Ui, id: TabId, pinned: bool, cmds: &mut Vec<Cmd>) {
     }
 }
 
+/// Per-frame animated factors of one tab (all 0..1).
+#[derive(Clone, Copy)]
+struct Fx {
+    hover: f32,
+    active: f32,
+    load: f32,
+    close: f32,
+    /// Fades the whole tab in while it grows from zero width.
+    appear: f32,
+}
+
+fn tab_fx(ctx: &egui::Context, t: &TabView, hovered: bool, key: Id, appear: f32) -> Fx {
+    Fx {
+        hover: widgets::fade(ctx, key.with("hv"), hovered, 0.14),
+        active: widgets::fade(ctx, key.with("ac"), t.active, 0.18),
+        load: widgets::fade(ctx, key.with("ld"), t.loading, 0.22),
+        close: widgets::fade(ctx, key.with("cl"), hovered || t.active, 0.14),
+        appear,
+    }
+}
+
+/// Favicon and spinner, cross-faded according to `fx.load`.
+fn paint_tab_icon(
+    painter: &egui::Painter,
+    icon_rect: Rect,
+    t: &TabView,
+    fx: &Fx,
+    pal: &Palette,
+    time: f64,
+) {
+    if fx.load < 1.0 {
+        let mut p = painter.clone();
+        p.multiply_opacity(1.0 - fx.load);
+        widgets::paint_site_icon(&p, icon_rect, t.favicon.as_ref(), &t.title, &t.url);
+    }
+    if fx.load > 0.0 {
+        widgets::paint_spinner(
+            painter,
+            icon_rect.center(),
+            6.5,
+            pal.accent.gamma_multiply(fx.load),
+            time,
+        );
+    }
+    if t.asleep && !t.active {
+        painter.circle_filled(icon_rect.right_bottom(), 3.0, pal.text_dim);
+    }
+}
+
+fn fx_bg(pal: &Palette, fx: &Fx) -> Color32 {
+    pal.bg
+        .lerp_to_gamma(pal.tab_hover, fx.hover)
+        .lerp_to_gamma(pal.tab_active, fx.active)
+}
+
 fn paint_tab(
     ui: &Ui,
     rect: Rect,
     t: &TabView,
-    hovered: bool,
+    fx: &Fx,
     pal: &Palette,
     compact: bool,
 ) -> Option<Rect> {
-    let painter = ui.painter_at(rect.expand(2.0));
+    let mut painter = ui.painter_at(rect.expand(2.0));
+    painter.set_opacity(fx.appear.clamp(0.0, 1.0));
     let radius = egui::CornerRadius {
         nw: 8,
         ne: 8,
         sw: 0,
         se: 0,
     };
-    if t.active {
-        painter.rect_filled(rect, radius, pal.tab_active);
-    } else if hovered {
-        painter.rect_filled(rect.shrink2(Vec2::new(1.0, 2.0)), 8.0, pal.tab_hover);
+    if fx.active > 0.0 {
+        painter.rect_filled(rect, radius, pal.tab_active.gamma_multiply(fx.active));
+    }
+    let hover_a = fx.hover * (1.0 - fx.active);
+    if hover_a > 0.0 {
+        painter.rect_filled(
+            rect.shrink2(Vec2::new(1.0, 2.0)),
+            8.0,
+            pal.tab_hover.gamma_multiply(hover_a),
+        );
     }
     let icon_rect = Rect::from_center_size(
         Pos2::new(
@@ -129,28 +191,15 @@ fn paint_tab(
         ),
         Vec2::splat(16.0),
     );
-    if t.loading {
-        let time = ui.input(|i| i.time);
-        widgets::paint_spinner(&painter, icon_rect.center(), 6.5, pal.accent, time);
-    } else {
-        widgets::paint_site_icon(&painter, icon_rect, t.favicon.as_ref(), &t.title, &t.url);
-    }
-    if t.asleep && !t.active {
-        painter.circle_filled(icon_rect.right_bottom(), 3.0, pal.text_dim);
-    }
+    paint_tab_icon(&painter, icon_rect, t, fx, pal, ui.input(|i| i.time));
     if compact {
         return None;
     }
-    let close_visible = t.active || hovered;
     let close_rect = Rect::from_center_size(
         Pos2::new(rect.right() - 16.0, rect.center().y),
         Vec2::splat(18.0),
     );
-    let mut text_right = if close_visible {
-        close_rect.left() - 4.0
-    } else {
-        rect.right() - 10.0
-    };
+    let mut text_right = widgets::lerp(rect.right() - 10.0, close_rect.left() - 4.0, fx.close);
     if t.audible {
         painter.text(
             Pos2::new(text_right - 8.0, rect.center().y),
@@ -163,48 +212,70 @@ fn paint_tab(
     }
     let text_rect = Rect::from_min_max(
         Pos2::new(icon_rect.right() + 8.0, rect.top()),
-        Pos2::new(text_right, rect.bottom()),
+        Pos2::new(text_right.max(icon_rect.right() + 8.0), rect.bottom()),
     );
-    let color = if t.active { pal.text } else { pal.text_dim };
+    let color = pal.text_dim.lerp_to_gamma(pal.text, fx.active);
     let galley = painter.layout_no_wrap(t.title.clone(), egui::FontId::proportional(12.5), color);
     let text_pos = Pos2::new(text_rect.left(), rect.center().y - galley.size().y / 2.0);
     let clip = painter.with_clip_rect(text_rect);
     clip.galley(text_pos, galley.clone(), color);
     // Fade-out instead of hard clipping.
     if galley.size().x > text_rect.width() {
-        let bg = if t.active {
-            pal.tab_active
-        } else if hovered {
-            pal.tab_hover
-        } else {
-            pal.bg
-        };
+        let bg = fx_bg(pal, fx).gamma_multiply(painter.opacity());
         let fade = Rect::from_min_max(
             Pos2::new(text_rect.right() - 24.0, rect.top() + 2.0),
             Pos2::new(text_rect.right(), rect.bottom() - 2.0),
         );
         let mut mesh = egui::Mesh::default();
-        mesh.colored_vertex(fade.left_top(), Color32::TRANSPARENT);
+        mesh.colored_vertex(fade.left_top(), bg.gamma_multiply(0.0));
         mesh.colored_vertex(fade.right_top(), bg);
         mesh.colored_vertex(fade.right_bottom(), bg);
-        mesh.colored_vertex(fade.left_bottom(), Color32::TRANSPARENT);
+        mesh.colored_vertex(fade.left_bottom(), bg.gamma_multiply(0.0));
         mesh.add_triangle(0, 1, 2);
         mesh.add_triangle(0, 2, 3);
         painter.add(mesh);
     }
-    if close_visible {
+    if fx.close > 0.4 {
         Some(close_rect)
     } else {
         None
     }
 }
 
+/// Close "x" glyph with a hover pill that fades; `alpha` follows the tab's close fade.
+fn paint_close_button(
+    ui: &Ui,
+    painter: &egui::Painter,
+    cr: Rect,
+    key: Id,
+    alpha: f32,
+    pal: &Palette,
+) {
+    let hot = ui.rect_contains_pointer(cr) && alpha > 0.4;
+    let t = widgets::fade(ui.ctx(), key.with("closeh"), hot, 0.12);
+    if t > 0.0 {
+        painter.rect_filled(cr, 9.0, pal.field.gamma_multiply(t * alpha));
+    }
+    painter.text(
+        cr.center(),
+        egui::Align2::CENTER_CENTER,
+        icon::X,
+        egui::FontId::proportional(12.0),
+        pal.text_dim
+            .lerp_to_gamma(pal.text, t)
+            .gamma_multiply(alpha),
+    );
+}
+
 /// Horizontal tab strip with a new-tab button.
 pub fn tab_strip(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &mut Vec<Cmd>) {
-    let pal = Palette::get(ui.ctx());
+    let ctx = ui.ctx().clone();
+    let pal = Palette::get(&ctx);
     let tabs = snapshot(w);
     let height = 34.0;
     let avail = ui.available_width();
+    let ready_id = Id::new("tabstrip-anim-ready");
+    let ready = ctx.data(|d| d.get_temp::<bool>(ready_id)).unwrap_or(false);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
         // Profile badge on the left for non-default profiles / guests.
@@ -223,46 +294,94 @@ pub fn tab_strip(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &mut V
         let free = (avail - 48.0 - n_pinned * (pinned_w + 2.0) - 40.0).max(60.0);
         let tab_w = (free / n_normal - 2.0).clamp(48.0, 230.0);
 
-        let mut rects = Vec::with_capacity(tabs.len());
+        // Target layout (relative to the strip origin) and its smoothed counterpart.
         let drag_id = w.chrome.tab_drag.as_ref().map(|d| d.id);
+        let gap = 2.0;
+        let mut target = Vec::with_capacity(tabs.len());
+        let mut cx = 0.0;
         for t in &tabs {
-            let width = if t.pinned { pinned_w } else { tab_w };
-            let (rect, resp) =
-                ui.allocate_exact_size(Vec2::new(width, height), Sense::click_and_drag());
-            rects.push(rect);
-            let hovered = resp.hovered();
+            let tw = if t.pinned { pinned_w } else { tab_w };
+            target.push((cx, tw));
+            cx += tw + gap;
+        }
+        let mut anim = Vec::with_capacity(tabs.len());
+        let mut span: f32 = 0.0;
+        for (t, &(tx, tw)) in tabs.iter().zip(&target) {
+            let key = Id::new(("tabanim", t.id));
+            let x = widgets::smooth(&ctx, key.with("x"), tx, None, 16.0);
+            let aw = widgets::smooth(&ctx, key.with("w"), tw, ready.then_some(0.0), 16.0);
+            span = span.max(x + aw + gap);
+            anim.push((x, aw));
+        }
+        let (strip, _) = ui.allocate_exact_size(Vec2::new(span, height), Sense::hover());
+        let mut rects = Vec::with_capacity(tabs.len());
+        let mut order: Vec<usize> = (0..tabs.len())
+            .filter(|&i| Some(tabs[i].id) != drag_id)
+            .collect();
+        order.extend((0..tabs.len()).filter(|&i| Some(tabs[i].id) == drag_id));
+        for &(tx, tw) in &target {
+            rects.push(Rect::from_min_size(
+                strip.min + Vec2::new(tx, 0.0),
+                Vec2::new(tw, height),
+            ));
+        }
+        for i in order {
+            let t = &tabs[i];
+            let key = Id::new(("tabanim", t.id));
+            let (mut x, aw) = anim[i];
+            let width = target[i].1;
+            let rect = Rect::from_min_size(strip.min + Vec2::new(x, 0.0), Vec2::new(aw, height));
+            let resp = ui.interact(rect, Id::new(("tab", t.id)), Sense::click_and_drag());
+            let hovered = resp.hovered() && drag_id.is_none_or(|d| d == t.id);
             let compact = t.pinned || width < 70.0;
             let mut paint_rect = rect;
-            if drag_id == Some(t.id)
-                && let Some(p) = ui.ctx().pointer_interact_pos()
-            {
+            let dragging = drag_id == Some(t.id);
+            let lift = widgets::fade(&ctx, key.with("lift"), dragging, 0.14);
+            if dragging && let Some(p) = ctx.pointer_interact_pos() {
                 let off = w
                     .chrome
                     .tab_drag
                     .as_ref()
                     .map(|d| d.grab_offset)
                     .unwrap_or(0.0);
-                paint_rect = rect.translate(Vec2::new(p.x - off - rect.left(), 0.0));
+                x = (p.x - off - strip.left()).clamp(0.0, (span - aw - gap).max(0.0));
+                widgets::smooth_set(&ctx, key.with("x"), x);
+                paint_rect = Rect::from_min_size(strip.min + Vec2::new(x, 0.0), rect.size());
             }
-            let close_rect = paint_tab(
-                ui,
-                paint_rect,
-                t,
-                hovered,
-                &pal,
-                compact && !(t.active && !t.pinned && width >= 48.0),
-            );
+            if lift > 0.0 {
+                paint_rect = paint_rect.translate(Vec2::new(0.0, -2.0 * lift));
+                let shadow = egui::epaint::Shadow {
+                    offset: [0, 3],
+                    blur: 12,
+                    spread: 0,
+                    color: Color32::from_black_alpha((90.0 * lift) as u8),
+                };
+                ui.painter().add(shadow.as_shape(
+                    paint_rect,
+                    egui::CornerRadius {
+                        nw: 8,
+                        ne: 8,
+                        sw: 4,
+                        se: 4,
+                    },
+                ));
+            }
+            let appear = if width > 0.0 { aw / width } else { 1.0 };
+            let mut fx = tab_fx(&ctx, t, hovered, key, appear);
+            if lift > 0.0 {
+                fx.hover = fx.hover.max(lift * 0.0);
+            }
+            let compact = compact && !(t.active && !t.pinned && width >= 48.0);
+            let close_rect = paint_tab(ui, paint_rect, t, &fx, &pal, compact);
             let close_hover = close_rect.is_some_and(|r| ui.rect_contains_pointer(r));
             if let Some(cr) = close_rect {
-                if close_hover {
-                    ui.painter().rect_filled(cr, 9.0, pal.field);
-                }
-                ui.painter().text(
-                    cr.center(),
-                    egui::Align2::CENTER_CENTER,
-                    icon::X,
-                    egui::FontId::proportional(12.0),
-                    pal.text_dim,
+                paint_close_button(
+                    ui,
+                    &ui.painter_at(rect.expand(2.0)),
+                    cr,
+                    key,
+                    fx.close,
+                    &pal,
                 );
             }
             if resp.clicked() {
@@ -276,8 +395,7 @@ pub fn tab_strip(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &mut V
                 cmds.push(Cmd::CloseTab(t.id));
             }
             if resp.drag_started() {
-                let grab = ui
-                    .ctx()
+                let grab = ctx
                     .pointer_interact_pos()
                     .map(|p| p.x - rect.left())
                     .unwrap_or(0.0);
@@ -298,7 +416,7 @@ pub fn tab_strip(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &mut V
         // Drag reorder: drop position by pointer x.
         if let Some(drag) = &w.chrome.tab_drag {
             let released = ui.input(|i| i.pointer.any_released());
-            if let Some(p) = ui.ctx().pointer_interact_pos()
+            if let Some(p) = ctx.pointer_interact_pos()
                 && let Some(from) = tabs.iter().position(|t| t.id == drag.id)
             {
                 let mut to = rects
@@ -317,7 +435,7 @@ pub fn tab_strip(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &mut V
             if released {
                 w.chrome.tab_drag = None;
             }
-            ui.ctx().request_repaint();
+            ctx.request_repaint();
         }
         ui.add_space(4.0);
         if widgets::icon_button(ui, icon::PLUS, "Nueva pestaña (Ctrl+T)", true).clicked() {
@@ -353,18 +471,21 @@ pub fn tab_strip(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &mut V
             }
         });
     });
-    // Animate spinners.
+    ctx.data_mut(|d| d.insert_temp(ready_id, true));
+    // Animate spinners (only while something loads or is still fading).
     if tabs.iter().any(|t| t.loading) {
-        ui.ctx()
-            .request_repaint_after(std::time::Duration::from_millis(33));
+        ctx.request_repaint_after(std::time::Duration::from_millis(16));
     }
 }
 
 /// Vertical tab sidebar.
 pub fn vertical_tabs(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &mut Vec<Cmd>) {
-    let pal = Palette::get(ui.ctx());
+    let ctx = ui.ctx().clone();
+    let pal = Palette::get(&ctx);
     let tabs = snapshot(w);
     let narrow = ui.available_width() < 120.0;
+    let ready_id = Id::new("vtabs-anim-ready");
+    let ready = ctx.data(|d| d.get_temp::<bool>(ready_id)).unwrap_or(false);
     ui.horizontal(|ui| {
         if !narrow {
             let color = super::theme::parse_hex(&env.profile.profile.color).unwrap_or(pal.accent);
@@ -384,12 +505,14 @@ pub fn vertical_tabs(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &m
         ui.horizontal_wrapped(|ui| {
             for t in pinned {
                 let (rect, resp) = ui.allocate_exact_size(Vec2::new(40.0, 34.0), Sense::click());
-                paint_tab(ui, rect, t, resp.hovered(), &pal, true);
-                if t.active {
+                let key = Id::new(("ptab", t.id));
+                let fx = tab_fx(&ctx, t, resp.hovered(), key, 1.0);
+                paint_tab(ui, rect, t, &fx, &pal, true);
+                if fx.active > 0.0 {
                     ui.painter().rect_stroke(
                         rect,
                         8.0,
-                        Stroke::new(1.5, pal.accent),
+                        Stroke::new(1.5, pal.accent.gamma_multiply(fx.active)),
                         egui::StrokeKind::Inside,
                     );
                 }
@@ -420,79 +543,61 @@ pub fn vertical_tabs(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &m
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
+            let content_top = ui.cursor().top();
+            let mut indicator: Option<(f32, f32)> = None; // (y relative to content, left)
             for (i, t) in tabs.iter().enumerate().filter(|(_, t)| !t.pinned) {
+                let key = Id::new(("vtab", t.id));
+                let row_h = widgets::smooth(&ctx, key.with("h"), 32.0, ready.then_some(0.0), 16.0);
                 let (rect, resp) = ui.allocate_exact_size(
-                    Vec2::new(ui.available_width(), 32.0),
+                    Vec2::new(ui.available_width(), row_h),
                     Sense::click_and_drag(),
                 );
-                let hovered = resp.hovered();
-                let painter = ui.painter();
                 if t.active {
-                    painter.rect_filled(rect, 8.0, pal.toolbar);
-                    painter.rect_filled(
-                        Rect::from_min_size(
-                            rect.left_top() + Vec2::new(0.0, 8.0),
-                            Vec2::new(3.0, 16.0),
-                        ),
-                        2.0,
-                        pal.accent,
-                    );
-                } else if hovered {
-                    painter.rect_filled(rect, 8.0, pal.tab_hover);
+                    indicator = Some((rect.top() - content_top, rect.left()));
                 }
+                let hovered = resp.hovered();
+                let fx = tab_fx(&ctx, t, hovered, key, row_h / 32.0);
+                let mut painter = ui.painter_at(rect);
+                painter.set_opacity(fx.appear.clamp(0.0, 1.0));
+                let painter = &painter;
+                if fx.active > 0.0 {
+                    painter.rect_filled(rect, 8.0, pal.toolbar.gamma_multiply(fx.active));
+                }
+                let hover_a = fx.hover * (1.0 - fx.active);
+                if hover_a > 0.0 {
+                    painter.rect_filled(rect, 8.0, pal.tab_hover.gamma_multiply(hover_a));
+                }
+                let center_y = rect.top() + 16.0;
                 let icon_rect = Rect::from_center_size(
-                    Pos2::new(rect.left() + 18.0, rect.center().y),
+                    Pos2::new(rect.left() + 18.0, center_y),
                     Vec2::splat(16.0),
                 );
-                if t.loading {
-                    widgets::paint_spinner(
-                        painter,
-                        icon_rect.center(),
-                        6.5,
-                        pal.accent,
-                        ui.input(|i| i.time),
-                    );
-                } else {
-                    widgets::paint_site_icon(
-                        painter,
-                        icon_rect,
-                        t.favicon.as_ref(),
-                        &t.title,
-                        &t.url,
-                    );
-                }
+                paint_tab_icon(painter, icon_rect, t, &fx, &pal, ui.input(|i| i.time));
                 let close_rect = Rect::from_center_size(
-                    Pos2::new(rect.right() - 16.0, rect.center().y),
+                    Pos2::new(rect.right() - 16.0, center_y),
                     Vec2::splat(18.0),
                 );
                 let close_hover = ui.rect_contains_pointer(close_rect) && (hovered || t.active);
                 if !narrow {
+                    let text_right =
+                        widgets::lerp(rect.right() - 10.0, close_rect.left() - 4.0, fx.close);
                     let text_rect = Rect::from_min_max(
                         Pos2::new(icon_rect.right() + 8.0, rect.top()),
-                        Pos2::new(close_rect.left() - 4.0, rect.bottom()),
+                        Pos2::new(text_right.max(icon_rect.right() + 8.0), rect.bottom()),
                     );
-                    let color = if t.active { pal.text } else { pal.text_dim };
+                    let color = pal.text_dim.lerp_to_gamma(pal.text, fx.active);
                     let galley = painter.layout_no_wrap(
                         t.title.clone(),
                         egui::FontId::proportional(12.5),
                         color,
                     );
                     painter.with_clip_rect(text_rect).galley(
-                        Pos2::new(text_rect.left(), rect.center().y - galley.size().y / 2.0),
+                        Pos2::new(text_rect.left(), center_y - galley.size().y / 2.0),
                         galley,
                         color,
                     );
-                    if hovered || t.active {
-                        if close_hover {
-                            painter.rect_filled(close_rect, 9.0, pal.field);
-                        }
-                        painter.text(
-                            close_rect.center(),
-                            egui::Align2::CENTER_CENTER,
-                            icon::X,
-                            egui::FontId::proportional(12.0),
-                            pal.text_dim,
-                        );
+                    if fx.close > 0.0 {
+                        paint_close_button(ui, painter, close_rect, key, fx.close, &pal);
                     }
                 }
                 if resp.clicked() {
@@ -518,10 +623,33 @@ pub fn vertical_tabs(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &m
                 resp.on_hover_text(title)
                     .context_menu(|ui| tab_context_menu(ui, t.id, false, cmds));
             }
+            // Sliding accent indicator bar for the active row.
+            let ind_id = Id::new("vtabs-indicator-y");
+            let present = indicator.is_some();
+            let alpha = widgets::fade(&ctx, ind_id.with("a"), present, 0.16);
+            if let Some((y, left)) = indicator {
+                let y = widgets::smooth(&ctx, ind_id, y, None, 20.0);
+                ctx.data_mut(|d| d.insert_temp(ind_id.with("left"), left));
+                let _ = y;
+            }
+            if alpha > 0.0 {
+                let y = ctx.data(|d| d.get_temp::<f32>(ind_id)).unwrap_or(0.0);
+                let left = ctx
+                    .data(|d| d.get_temp::<f32>(ind_id.with("left")))
+                    .unwrap_or(0.0);
+                ui.painter().rect_filled(
+                    Rect::from_min_size(
+                        Pos2::new(left, content_top + y + 8.0),
+                        Vec2::new(3.0, 16.0),
+                    ),
+                    2.0,
+                    pal.accent.gamma_multiply(alpha),
+                );
+            }
         });
+    ctx.data_mut(|d| d.insert_temp(ready_id, true));
     if tabs.iter().any(|t| t.loading) {
-        ui.ctx()
-            .request_repaint_after(std::time::Duration::from_millis(33));
+        ctx.request_repaint_after(std::time::Duration::from_millis(16));
     }
     let _ = AppCmd::Quit; // keep import used in all cfgs
 }

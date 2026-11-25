@@ -251,6 +251,55 @@ impl AssistantSettings {
     }
 }
 
+/// A page pinned to the right sidebar (like Vivaldi/Edge web panels).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct WebPanel {
+    pub id: String,
+    pub title: String,
+    pub url: String,
+    /// Mobile user agent for this panel (most sites lay out better in a narrow panel).
+    #[serde(default)]
+    pub mobile: bool,
+}
+
+impl WebPanel {
+    pub fn new(title: &str, url: &str) -> Self {
+        Self {
+            id: uuid::Uuid::new_v4().simple().to_string()[..10].to_string(),
+            title: title.to_string(),
+            url: url.to_string(),
+            mobile: false,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct SidebarSettings {
+    /// Show the icon rail on the right edge.
+    pub enabled: bool,
+    pub panels: Vec<WebPanel>,
+    /// Width of the open panel in points.
+    pub width: f32,
+    /// Open this panel (web panel id or `ext:<extension id>`) with Ctrl+J instead of the
+    /// built-in AI assistant.
+    pub assistant_panel: Option<String>,
+}
+
+impl Default for SidebarSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            panels: vec![
+                WebPanel::new("Wikipedia", "https://es.m.wikipedia.org/"),
+                WebPanel::new("Traductor", "https://www.deepl.com/translator"),
+            ],
+            width: 380.0,
+            assistant_panel: None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct Settings {
@@ -281,6 +330,7 @@ pub struct Settings {
     /// Suspend background tabs after this many minutes (0 = never) to save memory.
     pub tab_sleep_minutes: u32,
     pub language: String,
+    pub sidebar: SidebarSettings,
 }
 
 impl Default for Settings {
@@ -307,6 +357,7 @@ impl Default for Settings {
             confirm_close_many_tabs: true,
             tab_sleep_minutes: 30,
             language: String::new(),
+            sidebar: SidebarSettings::default(),
         }
     }
 }

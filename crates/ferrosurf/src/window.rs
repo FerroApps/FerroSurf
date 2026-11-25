@@ -120,7 +120,9 @@ pub struct BrowserWindow {
     pub rendering_context: Rc<WindowRenderingContext>,
     pub offscreen: Rc<OffscreenRenderingContext>,
     pub egui_ctx: egui::Context,
-    egui_winit: egui_winit::State,
+    /// `None` once the window is destroyed: its clipboard (smithay-clipboard on Wayland)
+    /// must be dropped while the Wayland connection is still alive.
+    egui_winit: Option<egui_winit::State>,
     painter: egui_glow::Painter,
     pub tabs: Vec<Tab>,
     pub active: usize,
@@ -203,7 +205,7 @@ impl BrowserWindow {
             rendering_context,
             offscreen,
             egui_ctx,
-            egui_winit,
+            egui_winit: Some(egui_winit),
             painter,
             tabs: Vec::new(),
             active: 0,
@@ -900,7 +902,8 @@ impl BrowserWindow {
             }
         }
 
-        let response = self.egui_winit.on_window_event(&self.window, event);
+        let Some(egui_winit) = self.egui_winit.as_mut() else { return };
+        let response = egui_winit.on_window_event(&self.window, event);
         if response.repaint {
             self.needs_redraw = true;
         }
@@ -1071,7 +1074,8 @@ impl BrowserWindow {
         self.needs_redraw = false;
         self.pending_repaint = None;
 
-        let raw_input = self.egui_winit.take_egui_input(&self.window);
+        let Some(egui_winit) = self.egui_winit.as_mut() else { return };
+        let raw_input = egui_winit.take_egui_input(&self.window);
         let mut cmds: Vec<Cmd> = Vec::new();
         let offscreen = self.offscreen.clone();
         let full_output = {
@@ -1080,8 +1084,10 @@ impl BrowserWindow {
                 ui::draw(root, self, env, &offscreen, &mut cmds);
             })
         };
-        self.egui_winit
-            .handle_platform_output(&self.window, full_output.platform_output);
+        if let Some(egui_winit) = self.egui_winit.as_mut() {
+            egui_winit
+                .handle_platform_output(&self.window, full_output.platform_output);
+        }
 
         // Resize the web content if the chrome layout changed.
         let size = self.content_size();
@@ -1166,6 +1172,8 @@ impl BrowserWindow {
     }
 
     pub fn destroy(&mut self) {
+        // Drop the clipboard worker first, while the display connection is alive.
+        self.egui_winit = None;
         let _ = self.rendering_context.make_current();
         self.tabs.clear();
         self.painter.destroy();

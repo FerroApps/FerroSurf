@@ -156,6 +156,16 @@ pub struct Chrome {
     pub dialogs: dialogs::DialogState,
     /// Screen rects (points) of floating chrome over the content (dropdowns etc).
     pub overlay_rects: Vec<Rect>,
+    /// Content progress bar animation state (only the active tab is kept).
+    pub load_bars: std::collections::HashMap<TabId, LoadBar>,
+    /// Last library tab shown, so the panel keeps its content while sliding out.
+    pub library_last: Option<LibraryTab>,
+}
+
+/// Animated state of the thin loading bar on top of the content.
+pub struct LoadBar {
+    pub progress: f32,
+    pub alpha: f32,
 }
 
 impl Chrome {
@@ -306,21 +316,32 @@ pub fn draw(
                 )
                 .show(root, |ui| tabs::vertical_tabs(ui, w, env, cmds));
         }
-        if w.chrome.assistant_open {
-            egui::Panel::right("assistant")
-                .resizable(true)
-                .default_size(380.0)
-                .size_range(280.0..=720.0)
-                .frame(
-                    egui::Frame::new()
-                        .fill(pal.toolbar)
-                        .inner_margin(egui::Margin::same(10)),
-                )
-                .show(root, |ui| assistant::panel(ui, w, env, cmds));
+        let mut assistant_open = w.chrome.assistant_open && env.profile.settings.assistant.enabled;
+        let was_open = assistant_open;
+        egui::Panel::right("assistant")
+            .resizable(true)
+            .drag_to_open(false)
+            .default_size(380.0)
+            .size_range(280.0..=720.0)
+            .frame(
+                egui::Frame::new()
+                    .fill(pal.toolbar)
+                    .inner_margin(egui::Margin::same(10)),
+            )
+            .show_collapsible(root, &mut assistant_open, |ui| {
+                assistant::panel(ui, w, env, cmds)
+            });
+        if was_open && !assistant_open {
+            w.chrome.assistant_open = false;
         }
         if let Some(tab) = w.chrome.library {
+            w.chrome.library_last = Some(tab);
+        }
+        let mut library_open = w.chrome.library.is_some();
+        if let Some(tab) = w.chrome.library.or(w.chrome.library_last) {
             egui::Panel::right("library")
                 .resizable(true)
+                .drag_to_open(false)
                 .default_size(400.0)
                 .size_range(300.0..=760.0)
                 .frame(
@@ -328,13 +349,20 @@ pub fn draw(
                         .fill(pal.toolbar)
                         .inner_margin(egui::Margin::same(10)),
                 )
-                .show(root, |ui| library::panel(ui, tab, w, env, cmds));
+                .show_collapsible(root, &mut library_open, |ui| {
+                    library::panel(ui, tab, w, env, cmds)
+                });
+            if w.chrome.library.is_some() && !library_open {
+                w.chrome.library = None;
+            }
         }
     }
 
-    if w.chrome.devtools_open && !fullscreen_content {
+    {
+        let mut devtools_open = w.chrome.devtools_open && !fullscreen_content;
         egui::Panel::bottom("devtools")
             .resizable(true)
+            .drag_to_open(false)
             .default_size(300.0)
             .size_range(140.0..=900.0)
             .frame(
@@ -342,7 +370,12 @@ pub fn draw(
                     .fill(pal.toolbar)
                     .inner_margin(egui::Margin::same(0)),
             )
-            .show(root, |ui| devtools::panel(ui, w, env, cmds));
+            .show_collapsible(root, &mut devtools_open, |ui| {
+                devtools::panel(ui, w, env, cmds)
+            });
+        if w.chrome.devtools_open && !fullscreen_content && !devtools_open {
+            w.chrome.devtools_open = false;
+        }
     }
 
     // Content area: the Servo framebuffer is blitted here.
@@ -355,12 +388,15 @@ pub fn draw(
     // Floating chrome.
     if w.chrome.find.open {
         find::find_bar(&ctx, w, cmds);
+    } else {
+        find::reset_anim(&ctx);
     }
     omnibox::dropdown(&ctx, w, env, cmds);
     dialogs::show_all(&ctx, w, env, cmds);
     if w.chrome.settings.is_some() {
         settings::window(&ctx, w, env, cmds);
     }
+    settings_pop(&ctx, w.chrome.settings.is_some());
     palette::show(&ctx, w, env, cmds);
     mcp_approval(&ctx, env, cmds, &pal);
     toasts(&ctx, env, &pal);
@@ -385,9 +421,10 @@ fn content_area(
             t.status_text.clone(),
             t.zoom,
             t.id,
+            t.is_loading(),
         )
     });
-    let Some((live, crashed, status, zoom, tab_id)) = tab_state else {
+    let Some((live, crashed, status, zoom, tab_id, loading)) = tab_state else {
         ui.painter().rect_filled(rect, 0.0, pal.bg);
         return;
     };
@@ -433,6 +470,8 @@ fn content_area(
     } else {
         ui.painter().rect_filled(rect, 0.0, pal.bg);
     }
+
+    load_bar(ui, rect, w, tab_id, loading, &pal);
 
     // Status bubble (link previews).
     if env.profile.settings.appearance.show_status_bubble
@@ -538,38 +577,144 @@ fn mcp_approval(ctx: &egui::Context, env: &mut Env, cmds: &mut Vec<Cmd>, pal: &P
 }
 
 fn toasts(ctx: &egui::Context, env: &mut Env, pal: &Palette) {
+    const LIFE: f32 = 4.0;
+    const IN: f32 = 0.28;
+    const OUT: f32 = 0.4;
     env.shared
         .toasts
-        .retain(|(_, t)| t.elapsed() < Duration::from_secs(4));
+        .retain(|(_, t)| t.elapsed().as_secs_f32() < LIFE);
     if env.shared.toasts.is_empty() {
         return;
     }
     let screen = ctx.content_rect();
+    let newest_in = env
+        .shared
+        .toasts
+        .last()
+        .map(|(_, t)| widgets::ease_out_cubic(t.elapsed().as_secs_f32() / IN))
+        .unwrap_or(1.0);
     egui::Area::new(Id::new("toasts"))
         .order(egui::Order::Tooltip)
-        .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -24.0))
+        .anchor(
+            egui::Align2::CENTER_BOTTOM,
+            egui::vec2(0.0, -24.0 + (1.0 - newest_in) * 16.0),
+        )
         .interactable(false)
         .show(ctx, |ui| {
             ui.set_max_width(screen.width() * 0.6);
-            for (msg, _) in &env.shared.toasts {
-                egui::Frame::new()
-                    .fill(if pal.dark {
-                        Color32::from_rgb(0x2b, 0x2f, 0x38)
-                    } else {
-                        Color32::from_rgb(0x26, 0x29, 0x30)
-                    })
-                    .corner_radius(10)
-                    .inner_margin(egui::Margin::symmetric(14, 9))
-                    .shadow(ctx.global_style().visuals.popup_shadow)
-                    .show(ui, |ui| {
-                        ui.label(
-                            egui::RichText::new(msg).color(Color32::from_rgb(0xf2, 0xf3, 0xf5)),
-                        );
-                    });
+            for (msg, born) in &env.shared.toasts {
+                let age = born.elapsed().as_secs_f32();
+                let appear = widgets::ease_out_cubic(age / IN);
+                let vanish = 1.0 - widgets::ease_out_cubic((age - (LIFE - OUT)) / OUT);
+                ui.scope(|ui| {
+                    ui.set_opacity((appear * vanish).clamp(0.0, 1.0));
+                    egui::Frame::new()
+                        .fill(if pal.dark {
+                            Color32::from_rgb(0x2b, 0x2f, 0x38)
+                        } else {
+                            Color32::from_rgb(0x26, 0x29, 0x30)
+                        })
+                        .corner_radius(12)
+                        .inner_margin(egui::Margin::symmetric(16, 10))
+                        .shadow(ctx.global_style().visuals.popup_shadow)
+                        .show(ui, |ui| {
+                            ui.label(
+                                egui::RichText::new(msg).color(Color32::from_rgb(0xf2, 0xf3, 0xf5)),
+                            );
+                        });
+                });
                 ui.add_space(6.0);
             }
         });
-    ctx.request_repaint_after(Duration::from_millis(250));
+    // Wake up only for the transitions; otherwise sleep until the next fade-out.
+    let next = env
+        .shared
+        .toasts
+        .iter()
+        .map(|(_, t)| {
+            let age = t.elapsed().as_secs_f32();
+            if age < IN || age > LIFE - OUT {
+                0.016
+            } else {
+                (LIFE - OUT - age).max(0.016)
+            }
+        })
+        .fold(f32::MAX, f32::min);
+    ctx.request_repaint_after(Duration::from_secs_f32(next));
+}
+
+/// Slim accent progress bar at the top of the page while the active tab loads:
+/// eases quickly towards ~85%, snaps to 100% when the load ends, then fades out.
+fn load_bar(
+    ui: &mut egui::Ui,
+    rect: Rect,
+    w: &mut BrowserWindow,
+    tab: TabId,
+    loading: bool,
+    pal: &Palette,
+) {
+    let dt = ui.input(|i| i.stable_dt).min(0.05);
+    let bars = &mut w.chrome.load_bars;
+    bars.retain(|id, _| *id == tab);
+    if loading {
+        let b = bars.entry(tab).or_insert(LoadBar {
+            progress: 0.0,
+            alpha: 1.0,
+        });
+        b.alpha = 1.0;
+        let rate = if b.progress < 0.35 { 2.6 } else { 0.8 };
+        b.progress += (0.85 - b.progress).max(0.0) * (1.0 - (-rate * dt).exp());
+    } else if let Some(b) = bars.get_mut(&tab) {
+        if b.progress < 0.995 {
+            b.progress += (1.0 - b.progress) * (1.0 - (-14.0 * dt).exp());
+            if b.progress > 0.995 {
+                b.progress = 1.0;
+            }
+        } else {
+            b.alpha -= dt / 0.35;
+        }
+        if b.alpha <= 0.0 {
+            bars.remove(&tab);
+        }
+    }
+    let Some(b) = bars.get(&tab) else {
+        return;
+    };
+    let head = rect.left() + rect.width() * b.progress;
+    let bar = Rect::from_min_max(rect.left_top(), Pos2::new(head, rect.top() + 2.0));
+    let a = b.alpha.clamp(0.0, 1.0);
+    if bar.width() > 0.5 {
+        let tail = pal.accent.gamma_multiply(0.35 * a);
+        let tip = pal.accent.gamma_multiply(a);
+        let mut mesh = egui::Mesh::default();
+        mesh.colored_vertex(bar.left_top(), tail);
+        mesh.colored_vertex(bar.right_top(), tip);
+        mesh.colored_vertex(bar.right_bottom(), tip);
+        mesh.colored_vertex(bar.left_bottom(), tail);
+        mesh.add_triangle(0, 1, 2);
+        mesh.add_triangle(0, 2, 3);
+        ui.painter().add(mesh);
+    }
+    ui.ctx().request_repaint();
+}
+
+/// Scale-in of the settings window (the fade comes from the window itself).
+fn settings_pop(ctx: &egui::Context, open: bool) {
+    let layer = egui::LayerId::new(egui::Order::Middle, Id::new("ferrosurf_settings_window"));
+    let t = widgets::fade(ctx, Id::new("settings-pop"), open, 0.2);
+    let dirty_id = Id::new("settings-pop-dirty");
+    if open && t < 1.0 {
+        let s = 0.95 + 0.05 * t;
+        let c = ctx.content_rect().center();
+        ctx.set_transform_layer(
+            layer,
+            egui::emath::TSTransform::new(c.to_vec2() * (1.0 - s), s),
+        );
+        ctx.data_mut(|d| d.insert_temp(dirty_id, true));
+    } else if ctx.data(|d| d.get_temp::<bool>(dirty_id)).unwrap_or(false) {
+        ctx.set_transform_layer(layer, egui::emath::TSTransform::IDENTITY);
+        ctx.data_mut(|d| d.insert_temp(dirty_id, false));
+    }
 }
 
 use std::rc::Rc;
