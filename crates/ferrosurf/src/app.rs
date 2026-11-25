@@ -47,13 +47,31 @@ impl EventLoopWaker for Waker {
 
 pub fn run(cli: Cli) -> anyhow::Result<()> {
     let event_loop = EventLoop::<AppEvent>::with_user_event().build()?;
+    // The tokio runtime is entered on the UI thread for the whole run: native file
+    // dialogs (rfd over the XDG portal, via zbus on tokio) need a reactor there.
+    let runtime = Arc::new(
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .thread_name("ferrosurf-rt")
+            .enable_all()
+            .build()?,
+    );
+    let _runtime_guard = runtime.enter();
     let mut app = App {
         cli,
+        runtime: runtime.clone(),
         proxy: event_loop.create_proxy(),
         state: None,
         failed: None,
     };
-    event_loop.run_app(&mut app)?;
+    let result = event_loop.run_app(&mut app);
+    // The event loop (and with it the Wayland/X11 connection) is gone now. Anything still
+    // holding windowing resources must not run its destructor: on Wayland the clipboard
+    // worker would touch a dead connection and crash. The process is exiting anyway.
+    if let Some(state) = app.state.take() {
+        std::mem::forget(state);
+    }
+    result?;
     if let Some(e) = app.failed {
         return Err(e);
     }
@@ -62,6 +80,7 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
 
 pub struct App {
     cli: Cli,
+    runtime: Arc<tokio::runtime::Runtime>,
     proxy: EventLoopProxy<AppEvent>,
     state: Option<Running>,
     failed: Option<anyhow::Error>,
@@ -78,7 +97,7 @@ struct Running {
     keymap_rev: u64,
     page_ctx: SharedPageContext,
     shared: SharedUi,
-    runtime: tokio::runtime::Runtime,
+    runtime: Arc<tokio::runtime::Runtime>,
     mcp: McpHost,
     user_scripts: Vec<Rc<UserScript>>,
     ext_revision: u64,
@@ -88,6 +107,17 @@ struct Running {
     screenshot: Option<ScreenshotJob>,
     quitting: bool,
     pending_app_cmds: Vec<AppCmd>,
+    /// Bridge prompts waiting for an asynchronous answer.
+    bridge_pending: Vec<(
+        servo::PromptDialog,
+        std::sync::mpsc::Receiver<Result<serde_json::Value, String>>,
+    )>,
+    bridge_script: Option<Rc<UserScript>>,
+    passkey_script: Option<Rc<UserScript>>,
+    plugin_scripts: Vec<Rc<UserScript>>,
+    plugin_scripts_key: Vec<(String, String)>,
+    /// Last active tab reported to plugins.
+    plugin_active: Option<(u64, String, String)>,
 }
 
 struct ScreenshotJob {
@@ -257,11 +287,7 @@ impl App {
         servo.set_delegate(delegate.clone());
         let ucm = Rc::new(UserContentManager::new(&servo));
 
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(2)
-            .thread_name("ferrosurf-rt")
-            .enable_all()
-            .build()?;
+        let runtime = self.runtime.clone();
         let mcp = McpHost::start(&runtime, &mut profile_data, wake.clone());
 
         let keymap = Keymap::new(&profile_data.settings.keybindings);
@@ -291,10 +317,17 @@ impl App {
             }),
             quitting: false,
             pending_app_cmds: Vec::new(),
+            bridge_pending: Vec::new(),
+            bridge_script: None,
+            passkey_script: None,
+            plugin_scripts: Vec::new(),
+            plugin_scripts_key: Vec::new(),
+            plugin_active: None,
         };
         running.shared.wake = Some(wake);
         running.shared.mcp_url = running.mcp.url();
         running.sync_extensions();
+        running.sync_plugin_scripts();
         running.refresh_page_context();
         running
             .mcp
@@ -500,6 +533,11 @@ impl Running {
             .map(|e| (e.id.clone(), e.root.clone()))
             .collect();
         ctx.newtab_override = self.profile.extensions.newtab_override();
+        ctx.favicon_dir = Some(self.profile.favicons.dir().to_path_buf());
+        ctx.assistant_enabled = self.profile.settings.assistant.enabled;
+        for (_, url) in ctx.top_sites.iter().chain(ctx.bookmarks.iter()) {
+            self.profile.favicons.ensure(url);
+        }
     }
 
     /// Re-install extension content scripts when extensions change.
@@ -509,6 +547,17 @@ impl Running {
             return;
         }
         self.ext_revision = rev;
+        if self.bridge_script.is_none() {
+            let script = Rc::new(UserScript::new(crate::bridge::CLIENT_JS.to_string(), None));
+            self.ucm.add_script(script.clone());
+            self.bridge_script = Some(script);
+            let polyfill = Rc::new(UserScript::new(
+                ferrosurf_passwords::WEBAUTHN_POLYFILL_JS.to_string(),
+                None,
+            ));
+            self.ucm.add_script(polyfill.clone());
+            self.passkey_script = Some(polyfill);
+        }
         for s in self.user_scripts.drain(..) {
             self.ucm.remove_script(s);
         }
@@ -520,6 +569,88 @@ impl Running {
         }
         self.profile.rebuild_blocker();
         self.refresh_page_context();
+    }
+
+    /// Re-install native plugin content scripts when the enabled set changes.
+    fn sync_plugin_scripts(&mut self) {
+        let scripts = self.profile.plugins.content_scripts();
+        if scripts == self.plugin_scripts_key {
+            return;
+        }
+        for s in self.plugin_scripts.drain(..) {
+            self.ucm.remove_script(s);
+        }
+        for (id, source) in &scripts {
+            log::info!("Installing content script of plugin {id}");
+            let script = Rc::new(UserScript::new(source.clone(), None));
+            self.ucm.add_script(script.clone());
+            self.plugin_scripts.push(script);
+        }
+        self.plugin_scripts_key = scripts;
+    }
+
+    /// Tell plugins which tab is active (only when it changes).
+    fn sync_plugin_active_tab(&mut self) {
+        let active = self.find_tab(None).map(|(wi, ti)| {
+            let t = &self.windows[wi].tabs[ti];
+            (
+                t.id,
+                t.url.as_ref().map(|u| u.to_string()).unwrap_or_default(),
+                t.title.clone(),
+            )
+        });
+        if active != self.plugin_active {
+            self.profile
+                .plugins
+                .set_active_tab(active.clone().map(|(tab_id, url, title)| {
+                    ferrosurf_plugins::sdk::abi::ActiveTab { tab_id, url, title }
+                }));
+            self.plugin_active = active;
+        }
+    }
+
+    /// Perform what plugins asked the browser to do.
+    fn process_plugin_requests(&mut self) {
+        use ferrosurf_plugins::HostRequest;
+        let requests = self.profile.plugins.drain_host_requests();
+        if requests.is_empty() {
+            return;
+        }
+        for req in requests {
+            match req {
+                HostRequest::Toast { text, .. } => self.shared.toast(&text),
+                HostRequest::Notify { title, body, .. } => {
+                    self.shared.toast(&format!("{title}: {body}"))
+                }
+                HostRequest::OpenUrl {
+                    url, background, ..
+                } => {
+                    let Ok(url) = Url::parse(&url) else { continue };
+                    let wi = self.focused_index();
+                    self.with_window(wi, |w, env| {
+                        w.open_tab(env, Some(url), !background, None);
+                    });
+                }
+                HostRequest::InjectJs { tab_id, code, .. } => {
+                    if let Some((wi, ti)) = self.find_tab(Some(tab_id))
+                        && let Some(wv) = &self.windows[wi].tabs[ti].webview
+                    {
+                        wv.evaluate_javascript(code, |_| {});
+                    }
+                }
+                HostRequest::ClipboardWrite { text, .. } => {
+                    if let Ok(mut cb) = arboard::Clipboard::new() {
+                        let _ = cb.set_text(text);
+                    }
+                }
+                HostRequest::PluginDisabled { plugin, reason } => self
+                    .shared
+                    .toast(&format!("Plugin «{plugin}» desactivado: {reason}")),
+                HostRequest::SettingChanged { .. } => {}
+            }
+        }
+        self.sync_plugin_scripts();
+        self.request_redraw_all();
     }
 
     fn session_state(&self, clean_exit: bool) -> SessionState {
@@ -607,7 +738,10 @@ impl Running {
     fn handle_engine_event(&mut self, _event_loop: &ActiveEventLoop, ev: EngineEvent) {
         match ev {
             EngineEvent::NewFrame(wv) => {
-                if let Some((wi, ti)) = self.find_webview(&wv) {
+                if let Some(w) = self.windows.iter_mut().find(|w| w.is_sidebar_webview(&wv)) {
+                    w.needs_redraw = true;
+                    w.window.request_redraw();
+                } else if let Some((wi, ti)) = self.find_webview(&wv) {
                     let w = &mut self.windows[wi];
                     if ti == w.active {
                         w.needs_redraw = true;
@@ -620,6 +754,13 @@ impl Running {
                     let tab = &mut self.windows[wi].tabs[ti];
                     tab.url = Some(url.clone());
                     tab.omnibox_edit = None;
+                    self.profile.plugins.notify_navigation(
+                        tab.id,
+                        url.as_str(),
+                        &tab.title,
+                        "commit",
+                    );
+                    self.profile.passwords.cancel_for_tab(tab.id);
                     let typed = std::mem::take(&mut tab.typed_navigation);
                     // The title arrives separately (TitleChanged / load complete).
                     let _ = self.profile.history.record_visit(url.as_str(), "", typed);
@@ -678,6 +819,12 @@ impl Running {
                             let _ = self.profile.history.update_title(u.as_str(), &t);
                         }
                         let tab_id = tab.id;
+                        self.profile.plugins.notify_navigation(
+                            tab_id,
+                            tab.url.as_ref().map(|u| u.as_str()).unwrap_or(""),
+                            &tab.title,
+                            "complete",
+                        );
                         self.mcp.on_load_complete(tab_id);
                         if let Some(job) = &mut self.screenshot
                             && job.loaded_at.is_none()
@@ -691,7 +838,12 @@ impl Running {
                 }
             }
             EngineEvent::Cursor(wv, cursor) => {
-                if let Some((wi, ti)) = self.find_webview(&wv) {
+                if let Some(w) = self.windows.iter().find(|w| w.is_sidebar_webview(&wv)) {
+                    if let Some(icon) = crate::input::cursor_icon(cursor) {
+                        w.window.set_cursor_visible(true);
+                        w.window.set_cursor(icon);
+                    }
+                } else if let Some((wi, ti)) = self.find_webview(&wv) {
                     let w = &self.windows[wi];
                     if ti == w.active {
                         match crate::input::cursor_icon(cursor) {
@@ -713,6 +865,21 @@ impl Running {
                             egui::TextureOptions::LINEAR,
                         )
                     });
+                    if let (Some(img), Some(u)) =
+                        (wv.favicon().and_then(|i| favicon_image(&i)), wv.url())
+                    {
+                        let bytes: Vec<u8> = img
+                            .pixels
+                            .iter()
+                            .flat_map(|c| c.to_srgba_unmultiplied())
+                            .collect();
+                        self.profile.favicons.store_rgba(
+                            u.as_str(),
+                            img.size[0] as u32,
+                            img.size[1] as u32,
+                            &bytes,
+                        );
+                    }
                     self.windows[wi].tabs[ti].favicon = tex;
                     self.windows[wi].window.request_redraw();
                 }
@@ -826,6 +993,16 @@ impl Running {
                             }
                         }
                         EmbedderControl::InputMethod(_) => {}
+                        EmbedderControl::SimpleDialog(servo::SimpleDialog::Prompt(prompt))
+                            if prompt.message().starts_with(crate::bridge::PREFIX) =>
+                        {
+                            let origin = self.windows[wi].tabs[ti]
+                                .url
+                                .as_ref()
+                                .map(ferrosurf_core::permissions::PermissionStore::origin_of)
+                                .unwrap_or_default();
+                            self.handle_bridge(prompt, origin, tab);
+                        }
                         other => {
                             self.windows[wi].controls.push((tab, other));
                             self.windows[wi].window.request_redraw();
@@ -844,8 +1021,15 @@ impl Running {
                 self.shared.toast(&format!("🔔 {} — {}", n.title, n.body));
                 self.request_redraw_all();
             }
-            EngineEvent::Console(_, level, msg) => {
+            EngineEvent::Console(wv, level, msg) => {
                 log::debug!(target: "console", "[{level:?}] {msg}");
+                if let Some((wi, ti)) = wv.as_ref().and_then(|w| self.find_webview(w)) {
+                    let level = format!("{level:?}").to_lowercase();
+                    self.windows[wi].tabs[ti].push_console(&level, msg);
+                    if self.windows[wi].chrome.devtools_open {
+                        self.windows[wi].window.request_redraw();
+                    }
+                }
             }
             EngineEvent::ResizeTo(_) => {}
             EngineEvent::DevtoolsStarted(port, token) => {
@@ -887,6 +1071,18 @@ impl Running {
                 return;
             }
         }
+        // Extension packages: install instead of downloading.
+        if matches!(
+            crate::store::detect(&url),
+            Some(crate::store::StoreItem::Direct { .. })
+        ) {
+            request.deny();
+            self.pending_app_cmds
+                .push(AppCmd::InstallFromStore(crate::store::StoreItem::Direct {
+                    url: url.clone(),
+                }));
+            return;
+        }
         // Likely downloads (Servo can't render these).
         if is_download_url(&url) {
             request.deny();
@@ -922,11 +1118,30 @@ impl Running {
             .clone()
             .map(|u| u.into_url())
             .or_else(|| wv.as_ref().and_then(|w| w.url()));
-        let decision = self.profile.blocker.read().check(&RequestInfo {
+        let info = RequestInfo {
             url: &url,
             initiator: initiator.as_ref(),
             resource_type,
-        });
+        };
+        let mut decision = self.profile.blocker.read().check(&info);
+        if matches!(decision, BlockDecision::Allow) {
+            decision = self.profile.plugins.check_request(&info).into();
+        }
+        if let Some((wi, ti)) = wv.as_ref().and_then(|w| self.find_webview(w)) {
+            let tab = &mut self.windows[wi].tabs[ti];
+            if req.is_for_main_frame && resource_type == ResourceType::MainFrame {
+                tab.network.clear();
+                tab.console.clear();
+            }
+            tab.push_network(crate::tab::NetEntry {
+                url: url.to_string(),
+                method: req.method.to_string(),
+                kind: format!("{resource_type:?}").to_lowercase(),
+                main_frame: req.is_for_main_frame,
+                blocked: matches!(decision, BlockDecision::Block),
+                time: std::time::SystemTime::now(),
+            });
+        }
         match decision {
             BlockDecision::Block => {
                 log::debug!("Blocked {url}");
@@ -1013,7 +1228,10 @@ impl Running {
                 }
             }
             AppCmd::Quit => self.quit(event_loop),
-            AppCmd::ExtensionsChanged => self.sync_extensions(),
+            AppCmd::ExtensionsChanged => {
+                self.sync_extensions();
+                self.sync_plugin_scripts();
+            }
             AppCmd::SettingsChanged => {
                 self.profile.flush_settings();
                 self.keymap = Keymap::new(&self.profile.settings.keybindings);
@@ -1082,11 +1300,172 @@ impl Running {
                 }
                 self.request_redraw_all();
             }
+            AppCmd::InstallFromStore(item) => {
+                let label = match &item {
+                    crate::store::StoreItem::Chrome { id } => id.clone(),
+                    crate::store::StoreItem::Firefox { slug } => slug.clone(),
+                    crate::store::StoreItem::Direct { url } => url.to_string(),
+                };
+                if !self.profile.store_busy.contains(&label) {
+                    self.profile.store_busy.push(label.clone());
+                    self.shared.toast(&format!(
+                        "Descargando la extensión desde {}…",
+                        item.store_name()
+                    ));
+                    let results = self.profile.store_results.clone();
+                    let wake = self.shared.wake.clone();
+                    std::thread::spawn(move || {
+                        let res = crate::store::download(&item).map_err(|e| format!("{e:#}"));
+                        results.lock().push((label, res));
+                        if let Some(wake) = wake {
+                            wake();
+                        }
+                    });
+                }
+                self.request_redraw_all();
+            }
+            AppCmd::InstallExtensionFile(path) => self.install_extension_file(&path, None),
             AppCmd::ReconnectMcpClients => self.mcp.connect_clients(&self.runtime, &self.profile),
             AppCmd::RestartMcpServer => {
                 self.mcp.restart_server(&self.runtime, &mut self.profile);
                 self.shared.mcp_url = self.mcp.url();
                 self.refresh_page_context();
+            }
+        }
+    }
+
+    /// Install a downloaded/picked extension package and report the result.
+    fn install_extension_file(&mut self, path: &std::path::Path, label: Option<&str>) {
+        // A malformed archive must never take the browser down.
+        let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.profile.extensions.install_from_archive(path)
+        }));
+        match res {
+            Ok(Ok(id)) => {
+                let (name, notes) = match self.profile.extensions.get(&id) {
+                    Some(ext) => {
+                        let raw: serde_json::Value = std::fs::read(ext.root.join("manifest.json"))
+                            .ok()
+                            .and_then(|b| serde_json::from_slice(&b).ok())
+                            .unwrap_or_default();
+                        (
+                            ext.manifest.name.clone(),
+                            crate::store::unsupported_features(&ext.manifest, &raw),
+                        )
+                    }
+                    None => (id.clone(), Vec::new()),
+                };
+                if notes.is_empty() {
+                    self.shared.toast(&format!(
+                        "🧩 «{name}» instalada. Recarga las páginas para activarla."
+                    ));
+                } else {
+                    self.shared.toast(&format!(
+                        "🧩 «{name}» instalada. Funcionan sus scripts de página y reglas de red; aún no: {}.",
+                        notes.join(", ")
+                    ));
+                }
+                self.sync_extensions();
+            }
+            Ok(Err(e)) => self
+                .shared
+                .toast(&format!("No se pudo instalar la extensión: {e:#}")),
+            Err(_) => self
+                .shared
+                .toast("No se pudo instalar la extensión: el archivo está dañado"),
+        }
+        if let Some(label) = label {
+            self.profile.store_busy.retain(|l| l != label);
+        }
+        self.request_redraw_all();
+    }
+
+    /// Answer a bridge call from a page/injected script (see `bridge.rs`).
+    fn handle_bridge(&mut self, mut prompt: servo::PromptDialog, origin: String, tab: TabId) {
+        let reply = match crate::bridge::parse(prompt.message()) {
+            Some(Ok(call)) => self.route_bridge(call, &origin, tab),
+            Some(Err(e)) => crate::bridge::Reply::Now(serde_json::json!({ "__error": e })),
+            None => return,
+        };
+        match reply {
+            crate::bridge::Reply::Now(v) => {
+                prompt.set_current_value(&v.to_string());
+                prompt.confirm();
+            }
+            crate::bridge::Reply::Later(rx) => self.bridge_pending.push((prompt, rx)),
+        }
+    }
+
+    fn route_bridge(
+        &mut self,
+        call: crate::bridge::BridgeCall,
+        origin: &str,
+        tab: TabId,
+    ) -> crate::bridge::Reply {
+        use crate::bridge::Reply;
+        if let Some(plugin) = call.channel.strip_prefix("plugin:") {
+            return Reply::Later(self.profile.plugins.page_message(
+                plugin,
+                origin,
+                tab,
+                call.payload,
+            ));
+        }
+        match call.channel.as_str() {
+            "webauthn" => {
+                let reply = self
+                    .profile
+                    .passwords
+                    .handle_bridge(call.payload, origin, tab);
+                self.request_redraw_all();
+                reply
+            }
+            "ping" => Reply::Now(
+                serde_json::json!({ "pong": true, "origin": origin, "version": env!("CARGO_PKG_VERSION") }),
+            ),
+            other => {
+                Reply::Now(serde_json::json!({ "__error": format!("canal desconocido: {other}") }))
+            }
+        }
+    }
+
+    fn poll_bridge(&mut self) {
+        let mut i = 0;
+        while i < self.bridge_pending.len() {
+            match self.bridge_pending[i].1.try_recv() {
+                Ok(res) => {
+                    let (mut prompt, _) = self.bridge_pending.remove(i);
+                    let text = match res {
+                        Ok(v) => v.to_string(),
+                        Err(e) => crate::bridge::error(e),
+                    };
+                    prompt.set_current_value(&text);
+                    prompt.confirm();
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => i += 1,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    let (mut prompt, _) = self.bridge_pending.remove(i);
+                    prompt.set_current_value(&crate::bridge::error("cancelado"));
+                    prompt.confirm();
+                }
+            }
+        }
+    }
+
+    fn poll_store_installs(&mut self) {
+        let done: Vec<_> = std::mem::take(&mut *self.profile.store_results.lock());
+        for (label, res) in done {
+            match res {
+                Ok(path) => {
+                    self.install_extension_file(&path, Some(&label));
+                    let _ = std::fs::remove_file(&path);
+                }
+                Err(e) => {
+                    self.profile.store_busy.retain(|l| *l != label);
+                    self.shared
+                        .toast(&format!("No se pudo descargar la extensión: {e}"));
+                    self.request_redraw_all();
+                }
             }
         }
     }
@@ -1496,6 +1875,13 @@ impl ApplicationHandler<AppEvent> for App {
         state.servo.spin_event_loop();
         state.process_engine_events(event_loop);
         state.process_mcp_commands();
+        state.poll_store_installs();
+        state.poll_bridge();
+        if state.profile.passwords.poll() {
+            state.request_redraw_all();
+        }
+        state.process_plugin_requests();
+        state.sync_plugin_active_tab();
         if state.mcp.poll_assistant(&mut state.shared) || state.profile.downloads.active_count() > 0
         {
             state.request_redraw_all();
@@ -1546,6 +1932,7 @@ impl ApplicationHandler<AppEvent> for App {
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         let Some(state) = &mut self.state else { return };
         state.maintenance();
+        state.sync_plugin_active_tab();
         state.process_app_cmds(event_loop);
         let mut next = Instant::now() + Duration::from_secs(5);
         for w in &mut state.windows {
@@ -1571,6 +1958,10 @@ impl ApplicationHandler<AppEvent> for App {
         if let Some(state) = &mut self.state {
             state.quit(event_loop);
         }
+        // Shut Servo down while the display connection is still alive (windows and their
+        // clipboards were destroyed in `quit`). Dropping it later, or not at all, crashes
+        // in SpiderMonkey / Wayland destructors at process exit.
+        drop(self.state.take());
     }
 }
 

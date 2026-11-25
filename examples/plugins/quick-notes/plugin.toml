@@ -1,0 +1,18 @@
+id = "quick-notes"
+name = "Quick Notes"
+version = "1.0.0"
+author = "FerroSurf contributors"
+description = "Guarda notas de las páginas desde la paleta y las ofrece al asistente de IA."
+api_version = 1
+permissions = ["storage", "tabs", "mcp_tools"]
+
+[[commands]]
+id = "save"
+title = "Guardar nota de esta página"
+shortcut = "Ctrl+Alt+N"
+
+[[tools]]
+name = "list_notes"
+description = "Lists the pages the user saved as notes (newest first): url, title and time saved."
+input_schema = '{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":100,"description":"How many notes to return (default 20)."}}}'
+read_only = true

@@ -19,6 +19,31 @@ use crate::profile_data::ProfileData;
 use crate::tab::TabId;
 use crate::ui::SharedUi;
 
+/// Several tool handlers exposed as one (browser tools + native plugin tools).
+struct Combined(Vec<Arc<dyn ToolHandler>>);
+
+impl ToolHandler for Combined {
+    fn tools(&self) -> Vec<ferrosurf_mcp::server::ToolDef> {
+        self.0.iter().flat_map(|h| h.tools()).collect()
+    }
+
+    fn call(
+        &self,
+        name: &str,
+        args: serde_json::Value,
+    ) -> ferrosurf_mcp::server::BoxFuture<'static, ferrosurf_mcp::server::ToolOutput> {
+        for h in &self.0 {
+            if h.tools().iter().any(|t| t.name == name) {
+                return h.call(name, args);
+            }
+        }
+        let name = name.to_string();
+        Box::pin(async move {
+            ferrosurf_mcp::server::ToolOutput::error(format!("herramienta desconocida: {name}"))
+        })
+    }
+}
+
 pub struct PendingLoad {
     pub tab: TabId,
     pub deadline: Instant,
@@ -82,7 +107,10 @@ impl McpHost {
             let _ = std::fs::remove_file(profile.paths.mcp_token());
             return;
         }
-        let handler: Arc<dyn ToolHandler> = Arc::new(self.external.clone());
+        let handler: Arc<dyn ToolHandler> = Arc::new(Combined(vec![
+            Arc::new(self.external.clone()),
+            Arc::new(profile.plugins.tool_handler()),
+        ]));
         match ferrosurf_mcp::spawn_http_server(
             rt.handle(),
             handler,
@@ -230,6 +258,7 @@ impl McpHost {
             tools.push(Arc::new(self.internal.clone()));
         }
         tools.push(Arc::new(self.clients.clone()));
+        tools.push(Arc::new(profile.plugins.tool_handler()));
         let history = shared.assistant.transcript.clone();
         shared.assistant.begin_turn(&text);
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();

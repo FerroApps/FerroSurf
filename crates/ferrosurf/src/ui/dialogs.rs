@@ -131,6 +131,7 @@ pub fn show_all(ctx: &egui::Context, w: &mut BrowserWindow, env: &mut Env, cmds:
                 }
             }
             EmbedderControl::ContextMenu(menu) => {
+                let ai_enabled = env.profile.settings.assistant.enabled;
                 let pos = content.min
                     + (Vec2::new(menu.position().min.x as f32, menu.position().min.y as f32) / ppp);
                 let info = menu.element_info().clone();
@@ -212,7 +213,9 @@ pub fn show_all(ctx: &egui::Context, w: &mut BrowserWindow, env: &mut Env, cmds:
                                 }
                             }
                             ui.separator();
-                            if info.flags.contains(ContextMenuElementInformationFlags::Selection) {
+                            if !ai_enabled {
+                                // Assistant disabled in settings: no AI entries.
+                            } else if info.flags.contains(ContextMenuElementInformationFlags::Selection) {
                                 if ui.button(format!("{}  Preguntar al asistente sobre la selección", icon::SPARKLE)).clicked() {
                                     cmds.push(Cmd::EvalInActive(ASK_SELECTION_JS.into()));
                                     w.chrome.assistant_open = true;
@@ -469,6 +472,59 @@ fn spanish_label(action: &ContextMenuAction) -> Option<&'static str> {
 
 const ASK_SELECTION_JS: &str = "String(window.getSelection())";
 
+/// "Install in FerroSurf" bar shown on Chrome Web Store / addons.mozilla.org pages.
+fn store_bar(
+    ui: &mut egui::Ui,
+    content: Rect,
+    w: &mut BrowserWindow,
+    env: &mut Env,
+    cmds: &mut Vec<Cmd>,
+) {
+    let Some(url) = w.active_tab().and_then(|t| t.url.clone()) else {
+        return;
+    };
+    let Some(item) = crate::store::detect(&url) else {
+        return;
+    };
+    if matches!(item, crate::store::StoreItem::Direct { .. })
+        || env.profile.store_dismissed.contains(url.as_str())
+    {
+        return;
+    }
+    let pal = Palette::get(ui.ctx());
+    let busy = !env.profile.store_busy.is_empty();
+    let area = egui::Area::new(Id::new("store-install-bar"))
+        .order(egui::Order::Foreground)
+        .fixed_pos(egui::pos2(content.center().x - 260.0, content.top() + 10.0))
+        .show(ui.ctx(), |ui| {
+            modal_frame(&pal).shadow(ui.ctx().global_style().visuals.popup_shadow).show(ui, |ui| {
+                ui.set_width(492.0);
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(icon::PUZZLE_PIECE).size(22.0).color(pal.accent));
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new(format!("Extensión de {}", item.store_name())).strong());
+                        ui.label(
+                            RichText::new("El botón de la tienda solo funciona en su navegador. Instálala desde aquí.")
+                                .small()
+                                .color(pal.text_dim),
+                        );
+                    });
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(icon::X).on_hover_text("Ocultar").clicked() {
+                            env.profile.store_dismissed.insert(url.to_string());
+                        }
+                        if busy {
+                            ui.spinner();
+                        } else if widgets::accent_button(ui, "Instalar en FerroSurf").clicked() {
+                            cmds.push(Cmd::App(AppCmd::InstallFromStore(item.clone())));
+                        }
+                    });
+                });
+            });
+        });
+    w.chrome.overlay_rects.push(area.response.rect);
+}
+
 /// Permission prompts anchored to the top-left of the content area.
 pub fn doorhangers(
     ui: &mut egui::Ui,
@@ -477,6 +533,7 @@ pub fn doorhangers(
     env: &mut Env,
     cmds: &mut Vec<Cmd>,
 ) {
+    store_bar(ui, content, w, env, cmds);
     let pal = Palette::get(ui.ctx());
     let active = w.active_tab().map(|t| t.id);
     let Some(idx) = w

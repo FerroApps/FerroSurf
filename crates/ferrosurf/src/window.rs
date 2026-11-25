@@ -49,6 +49,10 @@ pub enum AppCmd {
         allow: bool,
         always: bool,
     },
+    /// Download an extension package from a store page / link and install it.
+    InstallFromStore(crate::store::StoreItem),
+    /// Install a local `.zip` / `.xpi` / `.crx` file.
+    InstallExtensionFile(std::path::PathBuf),
 }
 
 /// References to app-wide state handed to window methods.
@@ -103,7 +107,28 @@ pub enum Cmd {
         url: Url,
     },
     EvalInActive(String),
+    /// Evaluate JS in the active tab and store the JSON result (or error) in `slot`.
+    DevtoolsEval {
+        script: String,
+        slot: crate::ui::devtools::EvalSlot,
+    },
+    /// Open/close a web panel of the right sidebar.
+    ToggleSidebarPanel(String),
+    CloseSidebar,
+    /// Open the sidebar panel's current page in a tab.
+    SidebarToTab,
+    SidebarReload,
     App(AppCmd),
+}
+
+/// The web panel open in the right sidebar: its own webview and framebuffer.
+pub struct SidebarView {
+    pub panel_id: String,
+    pub webview: WebView,
+    pub offscreen: Rc<OffscreenRenderingContext>,
+    /// Area in physical pixels (set by the UI each frame; empty while hidden).
+    pub rect_px: egui::Rect,
+    pub focused: bool,
 }
 
 pub struct BrowserWindow {
@@ -111,7 +136,9 @@ pub struct BrowserWindow {
     pub rendering_context: Rc<WindowRenderingContext>,
     pub offscreen: Rc<OffscreenRenderingContext>,
     pub egui_ctx: egui::Context,
-    egui_winit: egui_winit::State,
+    /// `None` once the window is destroyed: its clipboard (smithay-clipboard on Wayland)
+    /// must be dropped while the Wayland connection is still alive.
+    egui_winit: Option<egui_winit::State>,
     painter: egui_glow::Painter,
     pub tabs: Vec<Tab>,
     pub active: usize,
@@ -129,6 +156,8 @@ pub struct BrowserWindow {
     /// Tab ids to wake up after their webviews are dropped (sleeping).
     pub controls: Vec<(TabId, EmbedderControl)>,
     pub screenshot_requested: bool,
+    pub sidebar: Option<SidebarView>,
+    sidebar_hover: bool,
 }
 
 impl BrowserWindow {
@@ -194,7 +223,7 @@ impl BrowserWindow {
             rendering_context,
             offscreen,
             egui_ctx,
-            egui_winit,
+            egui_winit: Some(egui_winit),
             painter,
             tabs: Vec::new(),
             active: 0,
@@ -213,6 +242,8 @@ impl BrowserWindow {
             last_title: String::new(),
             controls: Vec::new(),
             screenshot_requested: false,
+            sidebar: None,
+            sidebar_hover: false,
         };
         ui::theme::apply(&me.egui_ctx, profile, me.window.theme());
         let _ = &mut me;
@@ -241,6 +272,166 @@ impl BrowserWindow {
 
     pub fn tab_index(&self, id: TabId) -> Option<usize> {
         self.tabs.iter().position(|t| t.id == id)
+    }
+
+    pub fn is_sidebar_webview(&self, webview: &WebView) -> bool {
+        self.sidebar
+            .as_ref()
+            .is_some_and(|s| s.webview.id() == webview.id())
+    }
+
+    /// Open (or toggle off) a web panel of the right sidebar.
+    pub fn toggle_sidebar_panel(&mut self, env: &Env, panel_id: &str) {
+        if self
+            .sidebar
+            .as_ref()
+            .is_some_and(|s| s.panel_id == panel_id)
+        {
+            self.sidebar = None;
+            self.needs_redraw = true;
+            return;
+        }
+        let Some(panel) = env
+            .profile
+            .settings
+            .sidebar
+            .panels
+            .iter()
+            .find(|p| p.id == panel_id)
+            .cloned()
+        else {
+            return;
+        };
+        let Some(url) = interpret_input(env, &panel.url) else {
+            return;
+        };
+        let _ = self.rendering_context.make_current();
+        let size = PhysicalSize::new(
+            (env.profile.settings.sidebar.width * self.scale()).max(1.0) as u32,
+            self.content_size().height,
+        );
+        let offscreen = Rc::new(self.rendering_context.offscreen_context(size));
+        let webview = WebViewBuilder::new(env.servo, offscreen.clone() as Rc<dyn RenderingContext>)
+            .url(url)
+            .hidpi_scale_factor(Scale::new(self.scale()))
+            .delegate(env.delegate.clone())
+            .user_content_manager(env.ucm.clone())
+            .build();
+        webview.resize(size);
+        webview.notify_theme_change(if env.profile.settings.appearance.web_dark_mode {
+            servo::Theme::Dark
+        } else {
+            servo::Theme::Light
+        });
+        self.sidebar = Some(SidebarView {
+            panel_id: panel.id,
+            webview,
+            offscreen,
+            rect_px: egui::Rect::NOTHING,
+            focused: false,
+        });
+        self.needs_redraw = true;
+    }
+
+    pub fn set_sidebar_rect(&mut self, rect_points: egui::Rect) {
+        let s = self.egui_ctx.pixels_per_point();
+        if let Some(sb) = &mut self.sidebar {
+            sb.rect_px = egui::Rect::from_min_max(
+                (rect_points.min.to_vec2() * s).round().to_pos2(),
+                (rect_points.max.to_vec2() * s).round().to_pos2(),
+            );
+        }
+    }
+
+    /// Route pointer/keyboard events to the sidebar webview. Returns true if consumed.
+    fn sidebar_input(&mut self, event: &WindowEvent) -> bool {
+        let Some(sb) = &mut self.sidebar else {
+            return false;
+        };
+        if sb.rect_px.width() < 1.0 {
+            return false;
+        }
+        let over = |p: Option<PhysicalPosition<f64>>, ctx: &egui::Context, chrome: &Chrome| {
+            p.map(|p| egui::pos2(p.x as f32, p.y as f32))
+                .filter(|p| sb.rect_px.contains(*p) && !chrome.blocks_content_at(ctx, *p, 1.0))
+        };
+        match event {
+            WindowEvent::CursorMoved { position, .. } => {
+                if let Some(p) = over(Some(*position), &self.egui_ctx, &self.chrome) {
+                    let local = p - sb.rect_px.min;
+                    sb.webview
+                        .notify_input_event(crate::input::mouse_move(local.x, local.y));
+                    self.sidebar_hover = true;
+                } else if self.sidebar_hover {
+                    self.sidebar_hover = false;
+                    sb.webview.notify_input_event(InputEvent::MouseLeftViewport(
+                        servo::MouseLeftViewportEvent {
+                            focus_moving_to_another_iframe: false,
+                        },
+                    ));
+                }
+                false
+            }
+            WindowEvent::MouseInput { state, button, .. } => {
+                let Some(p) = over(self.cursor_px, &self.egui_ctx, &self.chrome) else {
+                    if *state == ElementState::Pressed {
+                        sb.focused = false;
+                    }
+                    return false;
+                };
+                let Some(b) = crate::input::mouse_button(*button) else {
+                    return true;
+                };
+                let local = p - sb.rect_px.min;
+                let pressed = *state == ElementState::Pressed;
+                if pressed {
+                    sb.focused = true;
+                    sb.webview.set_focused(true);
+                    self.egui_ctx.memory_mut(|m| {
+                        if let Some(id) = m.focused() {
+                            m.surrender_focus(id);
+                        }
+                    });
+                }
+                sb.webview
+                    .notify_input_event(crate::input::mouse_button_event(
+                        pressed, b, local.x, local.y,
+                    ));
+                true
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                let Some(p) = over(self.cursor_px, &self.egui_ctx, &self.chrome) else {
+                    return false;
+                };
+                let local = p - sb.rect_px.min;
+                sb.webview
+                    .notify_input_event(crate::input::wheel(*delta, local.x, local.y));
+                true
+            }
+            WindowEvent::KeyboardInput {
+                event: key_event, ..
+            } if sb.focused && !self.egui_ctx.egui_wants_keyboard_input() => {
+                sb.webview
+                    .notify_input_event(InputEvent::Keyboard(crate::input::keyboard_event(
+                        key_event,
+                        self.modifiers,
+                    )));
+                true
+            }
+            WindowEvent::Ime(winit::event::Ime::Commit(text))
+                if sb.focused && !self.egui_ctx.egui_wants_keyboard_input() =>
+            {
+                sb.webview
+                    .notify_input_event(InputEvent::Ime(servo::ImeEvent::Composition(
+                        servo::CompositionEvent {
+                            state: servo::CompositionState::End,
+                            data: text.clone(),
+                        },
+                    )));
+                true
+            }
+            _ => false,
+        }
     }
 
     pub fn tab_by_webview(&self, webview: &WebView) -> Option<usize> {
@@ -409,6 +600,7 @@ impl BrowserWindow {
             return;
         }
         let tab = self.tabs.remove(idx);
+        env.profile.passwords.cancel_for_tab(tab.id);
         if let Some(url) = &tab.url
             && !(url.scheme() == "ferro" && url.host_str() == Some("newtab"))
         {
@@ -629,6 +821,16 @@ impl BrowserWindow {
             ShowDownloads => self.chrome.open_library(ui::LibraryTab::Downloads),
             ShowExtensions => self.chrome.open_settings(ui::SettingsPage::Extensions),
             ShowSettings => self.chrome.open_settings(ui::SettingsPage::Appearance),
+            ToggleAssistant
+                if let Some(panel) = env.profile.settings.sidebar.assistant_panel.clone() =>
+            {
+                self.toggle_sidebar_panel(env, &panel);
+            }
+            ToggleAssistant if !env.profile.settings.assistant.enabled => {
+                self.chrome.assistant_open = false;
+                env.shared
+                    .toast("El asistente IA está desactivado (Ajustes → Asistente IA)");
+            }
             ToggleAssistant => {
                 self.chrome.assistant_open = !self.chrome.assistant_open;
                 if self.chrome.assistant_open {
@@ -680,16 +882,7 @@ impl BrowserWindow {
             }
             ClearBrowsingData => self.chrome.open_settings(ui::SettingsPage::Privacy),
             DevTools => {
-                if env.profile.settings.enable_devtools {
-                    env.shared.toast(&format!(
-                        "Servidor de DevTools en el puerto {}. Conéctalo desde Firefox: about:debugging → Configurar → localhost:{}",
-                        env.profile.settings.devtools_port, env.profile.settings.devtools_port
-                    ));
-                } else {
-                    self.chrome.open_settings(ui::SettingsPage::Advanced);
-                    env.shared
-                        .toast("Activa las herramientas de desarrollo en Ajustes → Avanzado");
-                }
+                self.chrome.devtools_open = !self.chrome.devtools_open;
             }
             Screenshot => self.screenshot_requested = true,
             ViewSource => {
@@ -748,6 +941,21 @@ impl BrowserWindow {
     pub fn exec(&mut self, env: &mut Env, cmd: Cmd) {
         match cmd {
             Cmd::Action(a) => self.run_action(env, a),
+            Cmd::ToggleSidebarPanel(id) => self.toggle_sidebar_panel(env, &id),
+            Cmd::CloseSidebar => {
+                self.sidebar = None;
+                self.needs_redraw = true;
+            }
+            Cmd::SidebarReload => {
+                if let Some(sb) = &self.sidebar {
+                    sb.webview.reload();
+                }
+            }
+            Cmd::SidebarToTab => {
+                if let Some(url) = self.sidebar.as_ref().and_then(|s| s.webview.url()) {
+                    self.open_url(env, url, Disposition::NewForegroundTab);
+                }
+            }
             Cmd::Navigate { input, disposition } => self.navigate_input(env, &input, disposition),
             Cmd::OpenUrl { url, disposition } => self.open_url(env, url, disposition),
             Cmd::ActivateTab(id) => {
@@ -823,6 +1031,21 @@ impl BrowserWindow {
                     w.evaluate_javascript(js, |_| {});
                 }
             }
+            Cmd::DevtoolsEval { script, slot } => match self.active_webview() {
+                Some(w) => {
+                    let wake = env.shared.wake.clone();
+                    w.evaluate_javascript(script, move |res| {
+                        *slot.lock() = Some(match res {
+                            Ok(v) => Ok(crate::mcp_host::js_to_json(v)),
+                            Err(e) => Err(format!("{e:?}")),
+                        });
+                        if let Some(wake) = wake {
+                            wake();
+                        }
+                    });
+                }
+                None => *slot.lock() = Some(Err("No hay ninguna página cargada".into())),
+            },
             Cmd::App(c) => env.app_cmds.push(c),
         }
         self.needs_redraw = true;
@@ -880,9 +1103,27 @@ impl BrowserWindow {
             }
         }
 
-        let response = self.egui_winit.on_window_event(&self.window, event);
+        let Some(egui_winit) = self.egui_winit.as_mut() else {
+            return;
+        };
+        let response = egui_winit.on_window_event(&self.window, event);
         if response.repaint {
             self.needs_redraw = true;
+        }
+
+        if let WindowEvent::CursorMoved { position, .. } = event {
+            self.cursor_px = Some(*position);
+        }
+        if self.sidebar_input(event) {
+            return;
+        }
+        if let WindowEvent::MouseInput {
+            state: ElementState::Pressed,
+            ..
+        } = event
+            && let Some(sb) = &mut self.sidebar
+        {
+            sb.focused = false;
         }
 
         match event {
@@ -1051,7 +1292,10 @@ impl BrowserWindow {
         self.needs_redraw = false;
         self.pending_repaint = None;
 
-        let raw_input = self.egui_winit.take_egui_input(&self.window);
+        let Some(egui_winit) = self.egui_winit.as_mut() else {
+            return;
+        };
+        let raw_input = egui_winit.take_egui_input(&self.window);
         let mut cmds: Vec<Cmd> = Vec::new();
         let offscreen = self.offscreen.clone();
         let full_output = {
@@ -1060,8 +1304,9 @@ impl BrowserWindow {
                 ui::draw(root, self, env, &offscreen, &mut cmds);
             })
         };
-        self.egui_winit
-            .handle_platform_output(&self.window, full_output.platform_output);
+        if let Some(egui_winit) = self.egui_winit.as_mut() {
+            egui_winit.handle_platform_output(&self.window, full_output.platform_output);
+        }
 
         // Resize the web content if the chrome layout changed.
         let size = self.content_size();
@@ -1073,6 +1318,16 @@ impl BrowserWindow {
             }
             self.needs_redraw = true;
         }
+        if let Some(sb) = &self.sidebar {
+            let size = PhysicalSize::new(
+                (sb.rect_px.width().round() as u32).max(1),
+                (sb.rect_px.height().round() as u32).max(1),
+            );
+            if sb.rect_px.width() >= 1.0 && sb.offscreen.size() != size {
+                sb.webview.resize(size);
+                self.needs_redraw = true;
+            }
+        }
 
         // Paint: Servo renders into the offscreen FBO, then egui composites everything.
         if let Err(e) = self.rendering_context.make_current() {
@@ -1080,6 +1335,11 @@ impl BrowserWindow {
         }
         if let Some(w) = self.active_webview() {
             w.paint();
+        }
+        if let Some(sb) = &self.sidebar
+            && sb.rect_px.width() >= 1.0
+        {
+            sb.webview.paint();
         }
         self.rendering_context.prepare_for_rendering();
         let gl = self.rendering_context.glow_gl_api();
@@ -1146,7 +1406,10 @@ impl BrowserWindow {
     }
 
     pub fn destroy(&mut self) {
+        // Drop the clipboard worker first, while the display connection is alive.
+        self.egui_winit = None;
         let _ = self.rendering_context.make_current();
+        self.sidebar = None;
         self.tabs.clear();
         self.painter.destroy();
     }

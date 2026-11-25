@@ -14,6 +14,47 @@ pub fn next_tab_id() -> TabId {
     NEXT_TAB_ID.fetch_add(1, Ordering::Relaxed)
 }
 
+#[derive(Clone, Debug)]
+pub struct ConsoleEntry {
+    /// "log" | "debug" | "info" | "warn" | "error" | "trace" | "input" | "result"
+    pub level: String,
+    pub message: String,
+    pub time: std::time::SystemTime,
+}
+
+#[derive(Clone, Debug)]
+pub struct NetEntry {
+    pub url: String,
+    pub method: String,
+    /// Resource type as shown to developers ("document", "script", "image", ...).
+    pub kind: String,
+    pub main_frame: bool,
+    pub blocked: bool,
+    pub time: std::time::SystemTime,
+}
+
+pub const DEVTOOLS_LOG_CAP: usize = 2000;
+
+impl Tab {
+    pub fn push_console(&mut self, level: &str, message: String) {
+        if self.console.len() >= DEVTOOLS_LOG_CAP {
+            self.console.pop_front();
+        }
+        self.console.push_back(ConsoleEntry {
+            level: level.to_string(),
+            message,
+            time: std::time::SystemTime::now(),
+        });
+    }
+
+    pub fn push_network(&mut self, entry: NetEntry) {
+        if self.network.len() >= DEVTOOLS_LOG_CAP {
+            self.network.pop_front();
+        }
+        self.network.push_back(entry);
+    }
+}
+
 pub struct Tab {
     pub id: TabId,
     pub webview: Option<WebView>,
@@ -41,6 +82,10 @@ pub struct Tab {
     pub load_progress_start: Option<Instant>,
     /// Number of requests blocked by the content blocker on the current page.
     pub blocked_requests: u32,
+    /// Console messages of the current page (newest last), for the DevTools panel.
+    pub console: std::collections::VecDeque<ConsoleEntry>,
+    /// Network requests seen for this tab (newest last), for the DevTools panel.
+    pub network: std::collections::VecDeque<NetEntry>,
 }
 
 impl Tab {
@@ -67,6 +112,8 @@ impl Tab {
             audible: false,
             load_progress_start: None,
             blocked_requests: 0,
+            console: Default::default(),
+            network: Default::default(),
         }
     }
 

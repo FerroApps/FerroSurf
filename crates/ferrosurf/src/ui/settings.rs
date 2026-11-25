@@ -111,6 +111,24 @@ const PAGES: &[(SettingsPage, &str, &str, &str)] = &[
         "complementos addons instalar",
     ),
     (
+        SettingsPage::Plugins,
+        icon::CUBE,
+        "Plugins nativos",
+        "wasm rust plugins complementos",
+    ),
+    (
+        SettingsPage::Passwords,
+        icon::KEY,
+        "Contraseñas y passkeys",
+        "bitwarden contraseñas claves passkeys webauthn",
+    ),
+    (
+        SettingsPage::Sidebar,
+        icon::SIDEBAR_SIMPLE,
+        "Panel lateral",
+        "barra lateral paneles web",
+    ),
+    (
         SettingsPage::Profiles,
         icon::USERS,
         "Perfiles",
@@ -293,6 +311,13 @@ fn page_ui(
         SettingsPage::Assistant => assistant(ui, env),
         SettingsPage::Mcp => mcp(ui, st, env, cmds),
         SettingsPage::Extensions => extensions(ui, st, env, cmds),
+        SettingsPage::Plugins => super::plugins::settings_page(ui, env, cmds),
+        SettingsPage::Passwords => {
+            let acts = super::passwords::settings_section(ui, &mut env.profile.passwords);
+            super::passwords::apply_actions(acts, cmds);
+            false
+        }
+        SettingsPage::Sidebar => super::sidebar::settings_page(ui, env),
         SettingsPage::Profiles => profiles(ui, st, env, cmds),
         SettingsPage::Shortcuts => shortcuts(ui, st, env),
         SettingsPage::Import => import_page(ui, st, env),
@@ -765,23 +790,44 @@ fn search(ui: &mut Ui, st: &mut SettingsState, env: &mut Env) -> bool {
         }
         sep(ui);
         let n = &mut st.new_engine;
-        ui.horizontal(|ui| {
-            ui.add(
-                egui::TextEdit::singleline(&mut n.name)
-                    .hint_text("Nombre")
-                    .desired_width(110.0),
-            );
-            ui.add(
-                egui::TextEdit::singleline(&mut n.keyword)
-                    .hint_text("Palabra clave")
-                    .desired_width(90.0),
-            );
-            ui.add(
-                egui::TextEdit::singleline(&mut n.url)
-                    .hint_text("https://…?q={searchTerms}")
-                    .desired_width(f32::INFINITY),
-            );
-        });
+        ui.label(egui::RichText::new("Añadir un buscador").strong());
+        ui.add_space(4.0);
+        egui::Grid::new("new-engine-form")
+            .num_columns(2)
+            .spacing([12.0, 8.0])
+            .min_col_width(110.0)
+            .show(ui, |ui| {
+                let field_w = (ui.available_width() - 12.0).max(200.0);
+                ui.label("Nombre");
+                ui.add(
+                    egui::TextEdit::singleline(&mut n.name)
+                        .hint_text("p. ej. Wikipedia ES")
+                        .margin(egui::Margin::symmetric(8, 5))
+                        .desired_width(field_w),
+                );
+                ui.end_row();
+                ui.label("Palabra clave");
+                ui.add(
+                    egui::TextEdit::singleline(&mut n.keyword)
+                        .hint_text("p. ej. wes  →  escribe «wes término»")
+                        .margin(egui::Margin::symmetric(8, 5))
+                        .desired_width(field_w),
+                );
+                ui.end_row();
+                ui.label("URL de búsqueda");
+                ui.add(
+                    egui::TextEdit::singleline(&mut n.url)
+                        .hint_text("https://es.wikipedia.org/w/index.php?search={searchTerms}")
+                        .margin(egui::Margin::symmetric(8, 5))
+                        .desired_width(field_w),
+                );
+                ui.end_row();
+            });
+        ui.label(
+            egui::RichText::new("Usa {searchTerms} donde deba ir lo que escribas.")
+                .small()
+                .weak(),
+        );
         let valid = !n.name.trim().is_empty() && n.url.contains("{searchTerms}");
         ui.horizontal(|ui| {
             if ui
@@ -1569,13 +1615,8 @@ fn extensions(ui: &mut Ui, st: &mut SettingsState, env: &mut Env, cmds: &mut Vec
                 .add_filter("Extensión", &["zip", "xpi", "crx"])
                 .pick_file()
         {
-            match env.profile.extensions.install_from_archive(&file) {
-                Ok(_) => {
-                    env.shared.toast("Extensión instalada");
-                    changed = true;
-                }
-                Err(e) => env.shared.toast(&format!("No se pudo instalar: {e}")),
-            }
+            // Installed by the app (shared path with store installs, panic-safe).
+            cmds.push(Cmd::App(AppCmd::InstallExtensionFile(file)));
         }
         if widgets::subtle_button(ui, &format!("{}  Recargar", icon::ARROW_CLOCKWISE)).clicked() {
             match env.profile.extensions.reload() {

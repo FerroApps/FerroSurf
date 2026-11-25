@@ -131,20 +131,20 @@ pub fn apply(ctx: &egui::Context, profile: &ProfileData, system: Option<winit::w
     v.hyperlink_color = accent;
     v.selection.bg_fill = accent.gamma_multiply(if dark { 0.45 } else { 0.35 });
     v.selection.stroke = Stroke::new(1.0, accent);
-    v.window_corner_radius = CornerRadius::same(radius.saturating_add(4));
-    v.menu_corner_radius = CornerRadius::same(radius.saturating_add(2));
+    v.window_corner_radius = CornerRadius::same(radius.saturating_add(6));
+    v.menu_corner_radius = CornerRadius::same(radius.saturating_add(4));
     v.window_stroke = Stroke::new(1.0, pal.border);
     v.window_shadow = egui::epaint::Shadow {
-        offset: [0, 6],
-        blur: 24,
-        spread: 0,
-        color: Color32::from_black_alpha(if dark { 110 } else { 45 }),
+        offset: [0, 10],
+        blur: 36,
+        spread: 2,
+        color: Color32::from_black_alpha(if dark { 130 } else { 55 }),
     };
     v.popup_shadow = egui::epaint::Shadow {
-        offset: [0, 4],
-        blur: 16,
-        spread: 0,
-        color: Color32::from_black_alpha(if dark { 100 } else { 40 }),
+        offset: [0, 6],
+        blur: 22,
+        spread: 1,
+        color: Color32::from_black_alpha(if dark { 115 } else { 48 }),
     };
     for w in [
         &mut v.widgets.noninteractive,
@@ -203,7 +203,9 @@ pub fn apply(ctx: &egui::Context, profile: &ProfileData, system: Option<winit::w
         style.spacing.menu_margin = egui::Margin::same(6);
         style.spacing.window_margin = egui::Margin::same(14);
         style.interaction.tooltip_delay = 0.4;
-        style.animation_time = 0.12;
+        style.animation_time = 0.16;
+        style.scroll_animation =
+            egui::style::ScrollAnimation::new(1400.0, egui::Rangef::new(0.08, 0.28));
     });
     ctx.set_zoom_factor(app.ui_scale.clamp(0.6, 2.5));
 }
