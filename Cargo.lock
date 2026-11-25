@@ -2312,7 +2312,7 @@ checksum = "b97b65636e5b9ef369943878ac74335ba1c55c1cb6adbf1e2c293c624248d693"
 
 [[package]]
 name = "ferrosurf"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "arboard",
@@ -2351,7 +2351,7 @@ dependencies = [
 
 [[package]]
 name = "ferrosurf-core"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -2372,7 +2372,7 @@ dependencies = [
 
 [[package]]
 name = "ferrosurf-extensions"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "hex",
@@ -2390,7 +2390,7 @@ dependencies = [
 
 [[package]]
 name = "ferrosurf-mcp"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "axum",
