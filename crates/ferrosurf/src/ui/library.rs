@@ -21,7 +21,7 @@ const FOLDER_ROW_H: f32 = 32.0;
 const HIST_ROW_H: f32 = 40.0;
 
 /// Drag & drop payload for bookmark rows (a newtype so it cannot clash with other payloads).
-struct BmDrag(BookmarkId);
+pub(crate) struct BmDrag(pub(crate) BookmarkId);
 
 struct BookmarkEdit {
     id: BookmarkId,
@@ -307,6 +307,7 @@ fn drag_ghost(ctx: &egui::Context, env: &Env, pal: &Palette) {
 struct Tree<'a> {
     pal: Palette,
     bm: &'a ferrosurf_core::BookmarkStore,
+    favicons: &'a crate::favicons::FaviconStore,
     folders: Vec<(BookmarkId, String)>,
     ops: Vec<Op>,
 }
@@ -404,6 +405,7 @@ fn bookmarks_view(
         let mut tree = Tree {
             pal: *pal,
             bm: &env.profile.bookmarks,
+            favicons: &env.profile.favicons,
             folders: env.profile.bookmarks.folders(),
             ops: Vec::new(),
         };
@@ -763,7 +765,8 @@ fn bookmark_row(
             Pos2::new(rect.left() + 26.0 + indent, rect.center().y),
             vec2(18.0, 18.0),
         );
-        widgets::paint_site_icon(ui.painter(), icon_rect, None, &b.title, &b.url);
+        let tex = crate::favicons::texture(ui.ctx(), t.favicons, &b.url);
+        widgets::paint_site_icon(ui.painter(), icon_rect, tex.as_ref(), &b.title, &b.url);
         let left = icon_rect.right() + 10.0;
         let right = rect.right() - 8.0;
         let title = if b.title.is_empty() { &b.url } else { &b.title };
@@ -1335,7 +1338,14 @@ fn history_view(
                     );
                     let icon_rect =
                         Rect::from_center_size(Pos2::new(rect.left() + 64.0, cy), vec2(16.0, 16.0));
-                    widgets::paint_site_icon(ui.painter(), icon_rect, None, &row.title, &row.url);
+                    let tex = crate::favicons::texture(ui.ctx(), &env.profile.favicons, &row.url);
+                    widgets::paint_site_icon(
+                        ui.painter(),
+                        icon_rect,
+                        tex.as_ref(),
+                        &row.title,
+                        &row.url,
+                    );
                     let left = icon_rect.right() + 10.0;
                     let right = rect.right() - 8.0;
                     paint_ellipsized(

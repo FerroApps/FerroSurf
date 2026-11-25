@@ -1,0 +1,7 @@
+id = "gh-omnibox"
+name = "GitHub Omnibox"
+version = "1.0.0"
+author = "FerroSurf contributors"
+description = "Escribe «gh usuario/repo» en la barra de direcciones para ir directo a GitHub."
+api_version = 1
+omnibox_keyword = "gh"

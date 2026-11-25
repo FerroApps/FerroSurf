@@ -75,6 +75,7 @@ enum Run {
     Assistant(String),
     Search(String),
     Go(String),
+    Plugin { plugin: String, command: String },
 }
 
 enum EntryIcon {
@@ -194,9 +195,10 @@ fn build_entries(p: &Palette, w: &BrowserWindow, env: &Env) -> Vec<Entry> {
         });
     }
 
+    let assistant_on = env.profile.settings.assistant.enabled;
     let mut actions = Vec::new();
     for a in Action::all() {
-        if a == Action::CommandPalette {
+        if a == Action::CommandPalette || (!assistant_on && a == Action::ToggleAssistant) {
             continue;
         }
         let label = a.label();
@@ -213,6 +215,27 @@ fn build_entries(p: &Palette, w: &BrowserWindow, env: &Env) -> Vec<Entry> {
                 sub: String::new(),
                 shortcut: env.keymap.shortcut_for(a),
                 run: Run::Action(a),
+                score,
+            });
+        }
+    }
+    for c in env.profile.plugins.commands() {
+        let score = if q.is_empty() {
+            Some(0)
+        } else {
+            match_score(q, &format!("{} {}", c.title, c.plugin_name))
+        };
+        if let Some(score) = score {
+            actions.push(Entry {
+                group: "Plugins",
+                icon: EntryIcon::Glyph(icon::PUZZLE_PIECE),
+                title: c.title.clone(),
+                sub: c.plugin_name.clone(),
+                shortcut: c.shortcut.clone(),
+                run: Run::Plugin {
+                    plugin: c.plugin_id.clone(),
+                    command: c.id.clone(),
+                },
                 score,
             });
         }
@@ -321,6 +344,9 @@ fn build_entries(p: &Palette, w: &BrowserWindow, env: &Env) -> Vec<Entry> {
 
     let mut settings = Vec::new();
     for (page, name, kw) in SETTINGS_PAGES {
+        if !assistant_on && *page == SettingsPage::Assistant {
+            continue;
+        }
         if let Some(score) = match_score(q, &format!("ajustes {name} {kw}")) {
             settings.push(Entry {
                 group: "Ajustes",
@@ -345,15 +371,17 @@ fn build_entries(p: &Palette, w: &BrowserWindow, env: &Env) -> Vec<Entry> {
         run: Run::Search(q.to_string()),
         score: 0,
     });
-    out.push(Entry {
-        group: "Buscar",
-        icon: EntryIcon::Glyph(icon::SPARKLE),
-        title: format!("Preguntar al asistente: «{q}»"),
-        sub: String::new(),
-        shortcut: None,
-        run: Run::Assistant(q.to_string()),
-        score: 0,
-    });
+    if assistant_on {
+        out.push(Entry {
+            group: "Buscar",
+            icon: EntryIcon::Glyph(icon::SPARKLE),
+            title: format!("Preguntar al asistente: «{q}»"),
+            sub: String::new(),
+            shortcut: None,
+            run: Run::Assistant(q.to_string()),
+            score: 0,
+        });
+    }
     out
 }
 
@@ -386,6 +414,22 @@ fn run_entry(run: Run, new_tab: bool, w: &mut BrowserWindow, env: &Env, cmds: &m
             }),
         },
         Run::Go(input) => cmds.push(Cmd::Navigate { input, disposition }),
+        Run::Plugin { plugin, command } => {
+            let tab = w
+                .active_tab()
+                .map(|t| ferrosurf_plugins::sdk::abi::ActiveTab {
+                    tab_id: t.id,
+                    url: t.url_string(),
+                    title: t.title.clone(),
+                });
+            if let Err(e) = env
+                .profile
+                .plugins
+                .run_command(&plugin, &command, tab.as_ref())
+            {
+                log::warn!("Plugin command {plugin}/{command} failed: {e}");
+            }
+        }
     }
 }
 
@@ -468,9 +512,22 @@ fn paint_entry_icon(painter: &egui::Painter, center: Pos2, ico: &EntryIcon, pal:
 }
 
 pub fn show(ctx: &egui::Context, w: &mut BrowserWindow, env: &mut Env, cmds: &mut Vec<Cmd>) {
+    let anim_id = Id::new("palette-anim");
+    let layer = egui::LayerId::new(Order::Foreground, Id::new("palette-panel"));
     if !w.chrome.palette.is_open() {
+        // Reset so the next opening animates from scratch.
+        ctx.animate_bool_with_time(anim_id, false, 0.0);
+        ctx.data_mut(|d| d.remove::<f32>(anim_id.with("sel")));
+        if ctx
+            .data(|d| d.get_temp::<bool>(anim_id.with("dirty")))
+            .unwrap_or(false)
+        {
+            ctx.set_transform_layer(layer, egui::emath::TSTransform::IDENTITY);
+            ctx.data_mut(|d| d.insert_temp(anim_id.with("dirty"), false));
+        }
         return;
     }
+    let appear = super::widgets::fade(ctx, anim_id, true, 0.18);
     let mut p = std::mem::take(&mut w.chrome.palette);
     let pal = Theme::get(ctx);
     let screen = ctx.content_rect();
@@ -485,7 +542,7 @@ pub fn show(ctx: &egui::Context, w: &mut BrowserWindow, env: &mut Env, cmds: &mu
             ui.painter().rect_filled(
                 rect,
                 0,
-                Color32::from_black_alpha(if pal.dark { 140 } else { 85 }),
+                Color32::from_black_alpha(((if pal.dark { 140.0 } else { 85.0 }) * appear) as u8),
             );
             if resp.clicked() || resp.drag_started() {
                 close = true;
@@ -530,10 +587,26 @@ pub fn show(ctx: &egui::Context, w: &mut BrowserWindow, env: &mut Env, cmds: &mu
     let pos = Pos2::new(screen.center().x - width / 2.0, screen.top() + top);
     let max_list_h = (screen.height() - top - 90.0).clamp(160.0, 430.0);
 
+    if appear < 1.0 {
+        let sc = 0.96 + 0.04 * appear;
+        let pivot = Pos2::new(pos.x + width / 2.0, pos.y);
+        ctx.set_transform_layer(
+            layer,
+            egui::emath::TSTransform::new(pivot.to_vec2() * (1.0 - sc), sc),
+        );
+        ctx.data_mut(|d| d.insert_temp(anim_id.with("dirty"), true));
+    } else if ctx
+        .data(|d| d.get_temp::<bool>(anim_id.with("dirty")))
+        .unwrap_or(false)
+    {
+        ctx.set_transform_layer(layer, egui::emath::TSTransform::IDENTITY);
+        ctx.data_mut(|d| d.insert_temp(anim_id.with("dirty"), false));
+    }
     egui::Area::new(Id::new("palette-panel"))
         .order(Order::Foreground)
         .fixed_pos(pos)
         .show(ctx, |ui| {
+            ui.set_opacity(appear);
             egui::Frame::new()
                 .fill(pal.toolbar)
                 .stroke(Stroke::new(1.0, pal.border))
@@ -574,6 +647,7 @@ pub fn show(ctx: &egui::Context, w: &mut BrowserWindow, env: &mut Env, cmds: &mu
                         .max_height(max_list_h)
                         .auto_shrink([false, true])
                         .show(ui, |ui| {
+                            let content_top = ui.cursor().top();
                             ui.add_space(4.0);
                             let mut prev_group = "";
                             for (i, e) in entries.iter().enumerate() {
@@ -606,8 +680,20 @@ pub fn show(ctx: &egui::Context, w: &mut BrowserWindow, env: &mut Env, cmds: &mu
                                 }
                                 let inner = rect.shrink2(vec2(8.0, 1.0));
                                 if selected {
+                                    // The highlight glides to the selected row.
+                                    let y = super::widgets::smooth(
+                                        ctx,
+                                        anim_id.with("sel"),
+                                        inner.top() - content_top,
+                                        None,
+                                        26.0,
+                                    );
+                                    let hl = Rect::from_min_size(
+                                        Pos2::new(inner.left(), content_top + y),
+                                        inner.size(),
+                                    );
                                     ui.painter().rect_filled(
-                                        inner,
+                                        hl,
                                         8,
                                         pal.accent.gamma_multiply(if pal.dark {
                                             0.22
@@ -616,8 +702,8 @@ pub fn show(ctx: &egui::Context, w: &mut BrowserWindow, env: &mut Env, cmds: &mu
                                         }),
                                     );
                                     let bar = Rect::from_min_size(
-                                        inner.left_top() + vec2(0.0, 8.0),
-                                        vec2(3.0, inner.height() - 16.0),
+                                        hl.left_top() + vec2(0.0, 8.0),
+                                        vec2(3.0, hl.height() - 16.0),
                                     );
                                     ui.painter().rect_filled(bar, 2, pal.accent);
                                     if p.scroll_to_selected {

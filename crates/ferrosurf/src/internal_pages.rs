@@ -35,6 +35,9 @@ pub struct PageContext {
     pub extensions: Vec<(String, PathBuf)>,
     /// A new tab page provided by an extension.
     pub newtab_override: Option<PathBuf>,
+    /// Folder of cached favicons, served as `ferro://favicon/<host>`.
+    pub favicon_dir: Option<PathBuf>,
+    pub assistant_enabled: bool,
 }
 
 pub type SharedPageContext = Arc<RwLock<PageContext>>;
@@ -69,6 +72,14 @@ pub fn render_newtab(ctx: &PageContext) -> String {
         .replace("{{GREETING_NAME}}", &js_str(&ctx.profile_name))
         .replace("{{TOP_SITES_JSON}}", &json_list(&ctx.top_sites))
         .replace("{{BOOKMARKS_JSON}}", &json_list(&ctx.bookmarks))
+        .replace(
+            "{{ASSISTANT_DISPLAY}}",
+            if ctx.assistant_enabled {
+                "block"
+            } else {
+                "none"
+            },
+        )
 }
 
 pub fn render_about(ctx: &PageContext) -> String {
@@ -170,6 +181,26 @@ impl ProtocolHandler for FerroHandler {
                 "text/html; charset=utf-8",
                 200,
             ),
+            "favicon" => {
+                let host = url
+                    .as_url()
+                    .path()
+                    .trim_start_matches('/')
+                    .to_ascii_lowercase();
+                let safe = !host.is_empty()
+                    && host
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-');
+                match ctx
+                    .favicon_dir
+                    .as_ref()
+                    .filter(|_| safe)
+                    .and_then(|d| std::fs::read(d.join(format!("{host}.png"))).ok())
+                {
+                    Some(png) => (png, "image/png", 200),
+                    None => (Vec::new(), "image/png", 404),
+                }
+            }
             "logo.svg" | "logo" => (LOGO_SVG.as_bytes().to_vec(), "image/svg+xml", 200),
             "blank" => (b"<!doctype html><title></title>".to_vec(), "text/html", 200),
             _ => (

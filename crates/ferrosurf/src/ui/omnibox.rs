@@ -83,20 +83,33 @@ pub fn omnibox(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &mut Vec
     let width = ui.available_width();
     let (outer, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
     let focused = ui.memory(|m| m.has_focus(field_id()));
-    let fill = if focused {
-        if pal.dark {
-            Color32::from_rgb(0x16, 0x18, 0x1d)
-        } else {
-            Color32::WHITE
-        }
+    let ctx = ui.ctx().clone();
+    let focus_t = widgets::fade(&ctx, Id::new("omnibox-focus-anim"), focused, 0.18);
+    let hover_t = widgets::fade(
+        &ctx,
+        Id::new("omnibox-hover-anim"),
+        ui.rect_contains_pointer(outer) && !focused,
+        0.14,
+    );
+    let focused_fill = if pal.dark {
+        Color32::from_rgb(0x16, 0x18, 0x1d)
     } else {
-        pal.field
+        Color32::WHITE
     };
-    let stroke = if focused {
-        Stroke::new(1.5, pal.accent)
-    } else {
-        Stroke::NONE
-    };
+    let fill = pal
+        .field
+        .lerp_to_gamma(pal.field.lerp_to_gamma(pal.text, 0.05), hover_t)
+        .lerp_to_gamma(focused_fill, focus_t);
+    let stroke = Stroke::new(1.5, pal.accent.gamma_multiply(focus_t));
+    if focus_t > 0.0 {
+        // Soft focus halo that grows with the ring.
+        ui.painter().rect_stroke(
+            outer.expand(1.5 + 1.5 * focus_t),
+            height / 2.0 + 2.0,
+            Stroke::new(3.0, pal.accent.gamma_multiply(0.18 * focus_t)),
+            egui::StrokeKind::Outside,
+        );
+    }
     ui.painter()
         .rect(outer, height / 2.0, fill, stroke, egui::StrokeKind::Inside);
     w.chrome.omnibox.field_rect = FieldRect(outer);
@@ -470,16 +483,23 @@ fn update_suggestions(w: &mut BrowserWindow, env: &mut Env) {
 }
 
 pub fn dropdown(ctx: &egui::Context, w: &mut BrowserWindow, env: &mut Env, cmds: &mut Vec<Cmd>) {
+    let dd_anim = Id::new("omnibox-dropdown-anim");
+    let sel_anim = Id::new("omnibox-dropdown-sel");
     if !w.chrome.omnibox.is_open() || !w.chrome.omnibox.had_focus {
+        // Reset so the next opening animates from scratch.
+        ctx.animate_bool_with_time(dd_anim, false, 0.0);
+        ctx.data_mut(|d| d.remove::<f32>(sel_anim));
         return;
     }
+    let appear = widgets::fade(ctx, dd_anim, true, 0.16);
     let pal = Palette::get(ctx);
     let field = w.chrome.omnibox.field_rect.0;
     let mut clicked: Option<Suggestion> = None;
     let area = egui::Area::new(Id::new("omnibox-dropdown"))
         .order(egui::Order::Foreground)
-        .fixed_pos(field.left_bottom() + Vec2::new(0.0, 4.0))
+        .fixed_pos(field.left_bottom() + Vec2::new(0.0, 4.0 - (1.0 - appear) * 6.0))
         .show(ctx, |ui| {
+            ui.set_opacity(appear);
             egui::Frame::new()
                 .fill(pal.toolbar)
                 .stroke(Stroke::new(1.0, pal.border))
@@ -488,21 +508,44 @@ pub fn dropdown(ctx: &egui::Context, w: &mut BrowserWindow, env: &mut Env, cmds:
                 .inner_margin(egui::Margin::same(6))
                 .show(ui, |ui| {
                     ui.set_width(field.width() - 12.0);
+                    // Selection highlight glides between rows.
+                    let row_h = 32.0;
+                    let pitch = row_h + ui.spacing().item_spacing.y;
+                    let top0 = ui.cursor().top();
+                    if !w.chrome.omnibox.suggestions.is_empty() {
+                        let off = widgets::smooth(
+                            ctx,
+                            sel_anim,
+                            w.chrome.omnibox.selected as f32 * pitch,
+                            None,
+                            24.0,
+                        );
+                        ui.painter().rect_filled(
+                            Rect::from_min_size(
+                                egui::Pos2::new(ui.cursor().left(), top0 + off),
+                                Vec2::new(ui.available_width(), row_h),
+                            ),
+                            8.0,
+                            pal.accent.gamma_multiply(0.22),
+                        );
+                    }
                     for (i, s) in w.chrome.omnibox.suggestions.iter().enumerate() {
                         let selected = i == w.chrome.omnibox.selected;
                         let (rect, resp) = ui.allocate_exact_size(
                             Vec2::new(ui.available_width(), 32.0),
                             Sense::click(),
                         );
-                        if selected || resp.hovered() {
+                        let hover_t = widgets::fade(
+                            ctx,
+                            Id::new(("omnibox-row-hover", i)),
+                            resp.hovered() && !selected,
+                            0.1,
+                        );
+                        if hover_t > 0.0 {
                             ui.painter().rect_filled(
                                 rect,
                                 8.0,
-                                if selected {
-                                    pal.accent.gamma_multiply(0.22)
-                                } else {
-                                    pal.tab_hover
-                                },
+                                pal.tab_hover.gamma_multiply(hover_t),
                             );
                         }
                         let glyph = match s.kind {

@@ -1,10 +1,12 @@
 [workspace]
 resolver = "2"
 members = ["crates/*"]
+# Plugin examples build for wasm32 in their own workspace.
+exclude = ["examples"]
 default-members = ["crates/ferrosurf"]
 
 [workspace.package]
-version = "0.1.1"
+version = "0.1.4"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/FerroApps/FerroSurf"
@@ -14,6 +16,8 @@ rust-version = "1.88"
 ferrosurf-core = { path = "crates/ferrosurf-core" }
 ferrosurf-extensions = { path = "crates/ferrosurf-extensions" }
 ferrosurf-mcp = { path = "crates/ferrosurf-mcp" }
+ferrosurf-passwords = { path = "crates/ferrosurf-passwords" }
+ferrosurf-plugins = { path = "crates/ferrosurf-plugins" }
 anyhow = "1"
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }

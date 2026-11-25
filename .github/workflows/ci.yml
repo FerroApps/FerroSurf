@@ -29,9 +29,9 @@ jobs:
       - name: cargo fmt --check
         run: cargo fmt --all -- --check
       - name: cargo clippy -- -D warnings
-        run: cargo clippy -p ferrosurf-core -p ferrosurf-extensions -p ferrosurf-mcp --all-targets -- -D warnings
+        run: cargo clippy -p ferrosurf-core -p ferrosurf-extensions -p ferrosurf-mcp -p ferrosurf-plugins -p ferrosurf-plugin-sdk -p ferrosurf-passwords --all-targets -- -D warnings
       - name: cargo test
-        run: cargo test -p ferrosurf-core -p ferrosurf-extensions -p ferrosurf-mcp
+        run: cargo test -p ferrosurf-core -p ferrosurf-extensions -p ferrosurf-mcp -p ferrosurf-plugins -p ferrosurf-plugin-sdk -p ferrosurf-passwords
 
   # The browser crate links Servo (SpiderMonkey + WebRender): slow the first
   # time, then served from the rust-cache.

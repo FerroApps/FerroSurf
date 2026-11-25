@@ -1,0 +1,39 @@
+id = "privacy-redirects"
+name = "Privacy Redirects"
+version = "1.0.0"
+author = "FerroSurf contributors"
+description = "Redirige Twitter/X y YouTube a frontends que respetan la privacidad (desactivado por ajuste)."
+api_version = 1
+permissions = ["requests"]
+# The hook only runs for these hosts (and their subdomains).
+request_filters = ["host:twitter.com", "host:x.com", "host:youtube.com", "host:youtu.be"]
+
+[[settings]]
+key = "twitter_enabled"
+type = "bool"
+label = "Redirigir Twitter / X"
+description = "Abre los enlaces de twitter.com y x.com en el frontend de abajo."
+default = false
+
+[[settings]]
+key = "twitter_host"
+type = "string"
+label = "Frontend de Twitter"
+description = "Dominio, por ejemplo nitter.net."
+default = "nitter.net"
+max_len = 100
+
+[[settings]]
+key = "youtube_enabled"
+type = "bool"
+label = "Redirigir YouTube"
+description = "Abre los enlaces de youtube.com y youtu.be en el frontend de abajo."
+default = false
+
+[[settings]]
+key = "youtube_host"
+type = "string"
+label = "Frontend de YouTube"
+description = "Dominio de Piped o Invidious, por ejemplo piped.video."
+default = "piped.video"
+max_len = 100

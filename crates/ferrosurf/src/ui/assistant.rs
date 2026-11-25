@@ -725,21 +725,37 @@ pub fn panel(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &mut Vec<C
                             empty_state(ui, &pal, &mut send, &mut prefill);
                         }
                         let last = st.entries.len().saturating_sub(1);
+                        let ctx = ui.ctx().clone();
+                        let seen_id = egui::Id::new("assistant-entries-seen");
+                        let seen: usize = ctx
+                            .data(|d| d.get_temp(seen_id))
+                            .unwrap_or(st.entries.len());
                         for (i, e) in st.entries.iter().enumerate() {
-                            match e {
-                                ChatEntry::User(t) => user_bubble(ui, t, &pal),
-                                ChatEntry::Assistant(t) => {
-                                    ui.vertical(|ui| {
-                                        render_markdown(ui, t, cmds);
-                                        if st.running && i == last {
-                                            caret(ui, &pal);
-                                        }
-                                    });
-                                }
-                                ChatEntry::Tool { .. } => tool_card(ui, e, &pal),
+                            // New messages fade in and slide up a few pixels.
+                            let key = egui::Id::new(("assistant-entry-in", i));
+                            if i >= seen {
+                                super::widgets::smooth_set(&ctx, key, 0.0);
                             }
+                            let t = super::widgets::smooth(&ctx, key, 1.0, None, 13.0);
+                            ui.scope(|ui| {
+                                ui.set_opacity(t);
+                                ui.add_space((1.0 - t) * 12.0);
+                                match e {
+                                    ChatEntry::User(t) => user_bubble(ui, t, &pal),
+                                    ChatEntry::Assistant(t) => {
+                                        ui.vertical(|ui| {
+                                            render_markdown(ui, t, cmds);
+                                            if st.running && i == last {
+                                                caret(ui, &pal);
+                                            }
+                                        });
+                                    }
+                                    ChatEntry::Tool { .. } => tool_card(ui, e, &pal),
+                                }
+                            });
                             ui.add_space(8.0);
                         }
+                        ctx.data_mut(|d| d.insert_temp(seen_id, st.entries.len()));
                         if st.running
                             && !matches!(
                                 st.entries.last(),
