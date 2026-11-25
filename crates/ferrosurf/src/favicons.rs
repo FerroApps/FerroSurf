@@ -69,6 +69,7 @@ impl FaviconStore {
     }
 
     /// Cached PNG bytes for `url`'s host, if any.
+    #[cfg(test)]
     pub fn png_for_url(&self, url: &str) -> Option<Vec<u8>> {
         let host = host_key(url)?;
         std::fs::read(self.path_for_host(&host)).ok()
@@ -106,10 +107,10 @@ impl FaviconStore {
             if inner.fetching.contains(&host) {
                 return;
             }
-            if let Some(t) = inner.misses.get(&host) {
-                if t.elapsed().unwrap_or_default() < Duration::from_secs(24 * 3600) {
-                    return;
-                }
+            if let Some(t) = inner.misses.get(&host)
+                && t.elapsed().unwrap_or_default() < Duration::from_secs(24 * 3600)
+            {
+                return;
             }
             // Cap concurrent fetches.
             if inner.fetching.len() >= 6 {

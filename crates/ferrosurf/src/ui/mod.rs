@@ -7,7 +7,10 @@ pub mod find;
 pub mod library;
 pub mod omnibox;
 pub mod palette;
+pub mod passwords;
+pub mod plugins;
 pub mod settings;
+pub mod sidebar;
 pub mod tabs;
 pub mod theme;
 pub mod toolbar;
@@ -71,6 +74,9 @@ pub enum SettingsPage {
     Assistant,
     Mcp,
     Extensions,
+    Plugins,
+    Passwords,
+    Sidebar,
     Profiles,
     Shortcuts,
     Import,
@@ -252,6 +258,9 @@ pub fn draw(
     let ctx = root.ctx().clone();
     let pal = Palette::get(&ctx);
     w.chrome.overlay_rects.clear();
+    if let Some(sb) = &mut w.sidebar {
+        sb.rect_px = Rect::NOTHING;
+    }
 
     // Async results that arrived since last frame.
     if let Some(res) = w.chrome.find.result_slot.lock().take() {
@@ -316,6 +325,12 @@ pub fn draw(
                 )
                 .show(root, |ui| tabs::vertical_tabs(ui, w, env, cmds));
         }
+        if env.profile.settings.sidebar.enabled {
+            sidebar::rail(root, w, env, cmds);
+        } else if w.sidebar.is_some() {
+            cmds.push(Cmd::CloseSidebar);
+        }
+        sidebar::panel(root, w, env, cmds);
         let mut assistant_open = w.chrome.assistant_open && env.profile.settings.assistant.enabled;
         let was_open = assistant_open;
         egui::Panel::right("assistant")
@@ -393,6 +408,11 @@ pub fn draw(
     }
     omnibox::dropdown(&ctx, w, env, cmds);
     dialogs::show_all(&ctx, w, env, cmds);
+    {
+        let active = w.active_tab().map(|t| t.id);
+        let acts = passwords::consent_modal(&ctx, &mut env.profile.passwords, active);
+        passwords::apply_actions(acts, cmds);
+    }
     if w.chrome.settings.is_some() {
         settings::window(&ctx, w, env, cmds);
     }
@@ -403,7 +423,7 @@ pub fn draw(
 }
 
 /// Servo's "blit the offscreen framebuffer into the window" callback.
-type BlitToParent = dyn Fn(&glow::Context, euclid::default::Rect<i32>) + Send + Sync;
+pub(crate) type BlitToParent = dyn Fn(&glow::Context, euclid::default::Rect<i32>) + Send + Sync;
 
 fn content_area(
     ui: &mut egui::Ui,

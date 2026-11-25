@@ -111,6 +111,24 @@ const PAGES: &[(SettingsPage, &str, &str, &str)] = &[
         "complementos addons instalar",
     ),
     (
+        SettingsPage::Plugins,
+        icon::CUBE,
+        "Plugins nativos",
+        "wasm rust plugins complementos",
+    ),
+    (
+        SettingsPage::Passwords,
+        icon::KEY,
+        "Contraseñas y passkeys",
+        "bitwarden contraseñas claves passkeys webauthn",
+    ),
+    (
+        SettingsPage::Sidebar,
+        icon::SIDEBAR_SIMPLE,
+        "Panel lateral",
+        "barra lateral paneles web",
+    ),
+    (
         SettingsPage::Profiles,
         icon::USERS,
         "Perfiles",
@@ -293,6 +311,13 @@ fn page_ui(
         SettingsPage::Assistant => assistant(ui, env),
         SettingsPage::Mcp => mcp(ui, st, env, cmds),
         SettingsPage::Extensions => extensions(ui, st, env, cmds),
+        SettingsPage::Plugins => super::plugins::settings_page(ui, env, cmds),
+        SettingsPage::Passwords => {
+            let acts = super::passwords::settings_section(ui, &mut env.profile.passwords);
+            super::passwords::apply_actions(acts, cmds);
+            false
+        }
+        SettingsPage::Sidebar => super::sidebar::settings_page(ui, env),
         SettingsPage::Profiles => profiles(ui, st, env, cmds),
         SettingsPage::Shortcuts => shortcuts(ui, st, env),
         SettingsPage::Import => import_page(ui, st, env),

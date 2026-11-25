@@ -257,9 +257,6 @@ pub struct WebPanel {
     pub id: String,
     pub title: String,
     pub url: String,
-    /// Mobile user agent for this panel (most sites lay out better in a narrow panel).
-    #[serde(default)]
-    pub mobile: bool,
 }
 
 impl WebPanel {
@@ -268,7 +265,6 @@ impl WebPanel {
             id: uuid::Uuid::new_v4().simple().to_string()[..10].to_string(),
             title: title.to_string(),
             url: url.to_string(),
-            mobile: false,
         }
     }
 }

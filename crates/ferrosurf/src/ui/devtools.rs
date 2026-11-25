@@ -173,7 +173,6 @@ const JS_PICK_START: &str = r#"(function(){
 const JS_PICK_POLL: &str = "(function(){window.__ferroPickT=Date.now();\
     return JSON.stringify(window.__ferroPicked||null);})()";
 
-
 const JS_STORAGE: &str = r#"(function(){
   function g(n){try{return window[n];}catch(e){return null;}}
   function dump(s){if(!s)return null;try{var a=[];for(var i=0;i<s.length;i++){var k=s.key(i);

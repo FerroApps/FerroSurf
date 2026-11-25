@@ -35,6 +35,10 @@ agentes de IA pueden manejar el navegador) como cliente (el asistente puede usar
 | **Descargas** | Gestor con pausa/reanudación (HTTP Range), reintentos, velocidad y tiempo restante, enlaces `data:`; usa las cookies del sitio. |
 | **Perfiles múltiples** | Cada perfil es un directorio aislado (ajustes, marcadores, historial, extensiones, cookies y almacenamiento de Servo). Un proceso por perfil → aislamiento total. Perfil **invitado** efímero (`--guest`). |
 | **Extensiones** | Subconjunto de WebExtensions (MV2/MV3): `content_scripts` (JS+CSS con `matches`/`run_at`), API `chrome.storage.local`/`runtime`/`i18n`, reglas `declarativeNetRequest`, `chrome_url_overrides.newtab`. Instalación desde carpeta (modo desarrollador), `.zip`, `.xpi` o `.crx`. |
+| **Plugins nativos** | Plugins en Rust compilados a WebAssembly (sandbox `wasmi`, permisos por plugin, coste cero si están desactivados): bloquear/redirigir peticiones, scripts de página, comandos de la paleta, sugerencias en la barra de direcciones y herramientas MCP para el asistente. Ver [docs/plugins.md](docs/plugins.md). Las extensiones de Chrome/Firefox siguen funcionando como «legacy», instalables desde sus tiendas. |
+| **Contraseñas y passkeys** | Integración con **Bitwarden** (CLI `bw`): rellenar usuario/contraseña, TOTP. **Passkeys (WebAuthn)** con permiso explícito en cada uso, guardadas en Bitwarden o cifradas en el perfil. |
+| **Panel lateral** | Barra de paneles web a la derecha (traductor, chat, música, claude.ai…) que se abren junto a la página; Ctrl+J puede abrir un panel en lugar del asistente integrado. |
+| **DevTools** | Herramientas de desarrollo integradas (F12): consola con REPL, inspector de elementos, red, almacenamiento y rendimiento. |
 | **Privacidad** | Bloqueador de anuncios y rastreadores integrado (listas estilo Adblock Plus + DNR), Do-Not-Track, permisos por sitio, borrar datos de navegación. |
 | **IA nativa** | Panel **Asistente** (Ctrl+J) con streaming, uso de herramientas y lectura/acción sobre la página; proveedores Anthropic (Claude) u OpenAI-compatible (Ollama, LM Studio, OpenRouter…). |
 | **MCP** | Servidor MCP (Streamable HTTP en `127.0.0.1`, token Bearer) con 23 herramientas: pestañas, navegación, leer página, enlaces, clic, escribir, seleccionar, scroll, capturas, JS, historial y marcadores. Puente stdio (`ferrosurf --mcp-stdio`) para Claude Desktop/Code. Cliente MCP (stdio y HTTP) para el asistente. |
@@ -128,6 +132,9 @@ crates/
   ferrosurf-core/        perfiles, ajustes, marcadores, historial (SQLite), sesión,
                          descargas, permisos, búsqueda, omnibox, importadores
   ferrosurf-extensions/  manifiestos, match patterns, content scripts, bloqueador (ABP + DNR)
+  ferrosurf-plugins/     host de plugins nativos (WebAssembly en wasmi, permisos, MCP)
+  ferrosurf-plugin-sdk/  SDK para escribir plugins en Rust
+  ferrosurf-passwords/   cliente de Bitwarden, polyfill WebAuthn y autenticador de passkeys
   ferrosurf-mcp/         JSON-RPC, servidor MCP HTTP + puente stdio, cliente MCP,
                          herramientas del navegador, bucle del asistente (Anthropic/OpenAI)
   ferrosurf/             la app: winit + egui (chrome) + Servo (contenido), páginas ferro://

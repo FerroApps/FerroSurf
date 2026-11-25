@@ -64,6 +64,11 @@ pub fn toolbar(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &mut Vec
                 w.chrome.open_settings(SettingsPage::Extensions);
             }
             shield_button(ui, w, env, cmds);
+            {
+                let url = w.active_tab().map(|t| t.url_string()).unwrap_or_default();
+                let acts = super::passwords::toolbar_button(ui, &mut env.profile.passwords, &url);
+                super::passwords::apply_actions(acts, cmds);
+            }
             ui.add_space(4.0);
             ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 super::omnibox::omnibox(ui, w, env, cmds);

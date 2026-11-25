@@ -601,17 +601,6 @@ impl PasswordsHost {
         Ok(rx)
     }
 
-    /// Unlock from within the consent modal.
-    pub fn unlock_for_consent(&mut self, consent_id: u64) {
-        let Some(c) = self.consents.iter_mut().find(|c| c.id == consent_id) else {
-            return;
-        };
-        let pw = std::mem::take(&mut c.unlock_input);
-        if !pw.is_empty() {
-            self.unlock(pw);
-        }
-    }
-
     /// The user pressed "Permitir" on consent `id`.
     pub fn approve_consent(&mut self, id: u64) {
         let Some(pos) = self.consents.iter().position(|c| c.id == id) else {

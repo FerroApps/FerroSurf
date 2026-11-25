@@ -75,6 +75,7 @@ enum Run {
     Assistant(String),
     Search(String),
     Go(String),
+    Plugin { plugin: String, command: String },
 }
 
 enum EntryIcon {
@@ -214,6 +215,27 @@ fn build_entries(p: &Palette, w: &BrowserWindow, env: &Env) -> Vec<Entry> {
                 sub: String::new(),
                 shortcut: env.keymap.shortcut_for(a),
                 run: Run::Action(a),
+                score,
+            });
+        }
+    }
+    for c in env.profile.plugins.commands() {
+        let score = if q.is_empty() {
+            Some(0)
+        } else {
+            match_score(q, &format!("{} {}", c.title, c.plugin_name))
+        };
+        if let Some(score) = score {
+            actions.push(Entry {
+                group: "Plugins",
+                icon: EntryIcon::Glyph(icon::PUZZLE_PIECE),
+                title: c.title.clone(),
+                sub: c.plugin_name.clone(),
+                shortcut: c.shortcut.clone(),
+                run: Run::Plugin {
+                    plugin: c.plugin_id.clone(),
+                    command: c.id.clone(),
+                },
                 score,
             });
         }
@@ -392,6 +414,22 @@ fn run_entry(run: Run, new_tab: bool, w: &mut BrowserWindow, env: &Env, cmds: &m
             }),
         },
         Run::Go(input) => cmds.push(Cmd::Navigate { input, disposition }),
+        Run::Plugin { plugin, command } => {
+            let tab = w
+                .active_tab()
+                .map(|t| ferrosurf_plugins::sdk::abi::ActiveTab {
+                    tab_id: t.id,
+                    url: t.url_string(),
+                    title: t.title.clone(),
+                });
+            if let Err(e) = env
+                .profile
+                .plugins
+                .run_command(&plugin, &command, tab.as_ref())
+            {
+                log::warn!("Plugin command {plugin}/{command} failed: {e}");
+            }
+        }
     }
 }
 

@@ -10,6 +10,7 @@ mod favicons;
 mod input;
 mod internal_pages;
 mod mcp_host;
+mod passwords_host;
 mod profile_data;
 mod store;
 mod tab;

@@ -16,6 +16,8 @@ rust-version = "1.88"
 ferrosurf-core = { path = "crates/ferrosurf-core" }
 ferrosurf-extensions = { path = "crates/ferrosurf-extensions" }
 ferrosurf-mcp = { path = "crates/ferrosurf-mcp" }
+ferrosurf-passwords = { path = "crates/ferrosurf-passwords" }
+ferrosurf-plugins = { path = "crates/ferrosurf-plugins" }
 anyhow = "1"
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }

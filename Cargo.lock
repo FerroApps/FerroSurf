@@ -2327,6 +2327,8 @@ dependencies = [
  "ferrosurf-core",
  "ferrosurf-extensions",
  "ferrosurf-mcp",
+ "ferrosurf-passwords",
+ "ferrosurf-plugins",
  "glow",
  "http",
  "image",

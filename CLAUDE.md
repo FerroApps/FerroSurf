@@ -21,11 +21,16 @@ AI assistant.
   permissions, search engines, omnibox, importers. No engine dependency.
 - `crates/ferrosurf-extensions` — WebExtension subset (content scripts as Servo user scripts,
   DNR rules) and the ad/tracker blocker.
+- `crates/ferrosurf-plugins` + `ferrosurf-plugin-sdk` — native WASM plugins (wasmi, permissions,
+  zero cost when disabled); examples in `examples/plugins` (own workspace, `build.sh`).
+- `crates/ferrosurf-passwords` — Bitwarden CLI client, WebAuthn polyfill + passkey authenticator.
 - `crates/ferrosurf-mcp` — JSON-RPC, MCP HTTP server + stdio bridge, MCP client, browser tools,
   assistant loop (Anthropic / OpenAI-compatible).
 - `crates/ferrosurf` — the app: `app.rs` (Servo, windows, engine events, MCP commands),
   `window.rs` (tabs, input, GL composition), `delegate.rs` (Servo callbacks → queued events),
   `internal_pages.rs` (`ferro://`, `ferro-extension://`), `ui/` (egui chrome).
+- Page ↔ browser calls go through `bridge.rs` (`prompt()` with a magic prefix): treat every call
+  as untrusted (origin comes from the tab URL; sensitive actions need user consent).
 - Servo is single-threaded (`Rc`); MCP/assistant/downloads run on tokio and talk to the UI
   thread through channels + `EventLoopProxy` wakes.
 

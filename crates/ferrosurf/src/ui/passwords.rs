@@ -466,3 +466,22 @@ pub fn settings_section(ui: &mut egui::Ui, host: &mut PasswordsHost) -> Vec<Pass
     }
     actions
 }
+
+/// Turn UI actions into window commands.
+pub fn apply_actions(actions: Vec<PasswordUiAction>, cmds: &mut Vec<crate::window::Cmd>) {
+    for a in actions {
+        match a {
+            PasswordUiAction::Fill { script } => {
+                cmds.push(crate::window::Cmd::EvalInActive(script))
+            }
+            PasswordUiAction::OpenUrl(u) => {
+                if let Ok(url) = url::Url::parse(&u) {
+                    cmds.push(crate::window::Cmd::OpenUrl {
+                        url,
+                        disposition: crate::window::Disposition::NewForegroundTab,
+                    });
+                }
+            }
+        }
+    }
+}
