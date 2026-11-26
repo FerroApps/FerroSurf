@@ -1443,6 +1443,43 @@ mod tests {
     }
 
     #[test]
+    fn builtin_list_allows_duckduckgo_images() {
+        // Regression guard for "DuckDuckGo Images is empty": none of the requests the images
+        // tab makes may be blocked by the built-in list, as first or third party.
+        let b = Blocker::with_builtin_lists();
+        let page = Some("https://duckduckgo.com/?q=kek&iax=images&ia=images");
+        for (url, t) in [
+            (
+                "https://duckduckgo.com/?q=kek&iax=images&ia=images",
+                R::MainFrame,
+            ),
+            (
+                "https://duckduckgo.com/i.js?l=wt-wt&o=json&q=kek&vqd=4-123&f=,,,,,&p=1",
+                R::Xhr,
+            ),
+            (
+                "https://duckduckgo.com/d.js?q=kek&vqd=4-123&l=wt-wt&p=1&s=0",
+                R::Script,
+            ),
+            (
+                "https://duckduckgo.com/dist/wpm.images.1a2b3c.js",
+                R::Script,
+            ),
+            ("https://duckduckgo.com/local.js?get_ip=1", R::Xhr),
+            (
+                "https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Ftse1.mm.bing.net%2Fth%3Fid%3DOIP.x&f=1&nofb=1",
+                R::Image,
+            ),
+            ("https://tse1.mm.bing.net/th?id=OIP.abc&pid=Api", R::Image),
+            ("https://improving.duckduckgo.com/t/iai?7&q=kek", R::Ping),
+            ("https://improving.duckduckgo.com/t/iai?7&q=kek", R::Image),
+            ("https://links.duckduckgo.com/d.js?q=kek", R::Script),
+        ] {
+            assert_eq!(chk(&b, url, page, t), Decision::Allow, "{url} ({t:?})");
+        }
+    }
+
+    #[test]
     fn performance_sanity() {
         let mut list = String::new();
         for i in 0..10_000 {

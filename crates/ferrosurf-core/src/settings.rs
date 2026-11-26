@@ -316,6 +316,10 @@ pub struct Settings {
     pub smooth_scrolling: bool,
     pub enable_devtools: bool,
     pub devtools_port: u16,
+    /// Turn on the Servo web APIs that are still behind a preference but that common sites
+    /// need (IntersectionObserver: infinite scroll / lazy grids such as DuckDuckGo Images).
+    /// Applied when the engine starts.
+    pub experimental_web_features: bool,
     pub mcp_server: McpServerSettings,
     pub mcp_servers: Vec<McpServerConfig>,
     pub assistant: AssistantSettings,
@@ -346,6 +350,7 @@ impl Default for Settings {
             smooth_scrolling: true,
             enable_devtools: false,
             devtools_port: 6080,
+            experimental_web_features: true,
             mcp_server: McpServerSettings::default(),
             mcp_servers: Vec::new(),
             assistant: AssistantSettings::default(),
@@ -402,6 +407,8 @@ mod tests {
         assert_eq!(s.appearance.theme, ThemeMode::Dark);
         assert!(s.appearance.show_bookmarks_bar);
         assert_eq!(s.search_engine, "duckduckgo");
+        // Settings files from before the option existed get the engine features on.
+        assert!(s.experimental_web_features);
     }
 
     #[test]

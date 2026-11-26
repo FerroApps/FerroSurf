@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use egui::{Color32, Id, Rect, RichText, Sense, Stroke, Ui, Vec2};
 use egui_phosphor::regular as icon;
-use ferrosurf_core::omnibox::{Suggestion, SuggestionKind};
+use ferrosurf_core::omnibox::{self as core_omnibox, Suggestion, SuggestionKind};
 
 use super::{Palette, widgets};
 use crate::actions::Action;
@@ -38,6 +38,8 @@ pub struct OmniboxState {
     fetched_for: String,
     pub field_rect: FieldRect,
     had_focus: bool,
+    /// The click that focused the field is still held: select all on release unless dragged.
+    click_focus_pending: bool,
 }
 
 impl OmniboxState {
@@ -154,7 +156,7 @@ pub fn omnibox(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &mut Vec
     let display_text = if focused {
         text.clone()
     } else {
-        prettify_for_display(&text)
+        core_omnibox::display_url(&text)
     };
     let mut buffer = if focused { text.clone() } else { display_text };
     let edit = egui::TextEdit::singleline(&mut buffer)
@@ -179,18 +181,70 @@ pub fn omnibox(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &mut Vec
         buffer = url_display.clone();
     }
     if resp.gained_focus() || (w.chrome.select_all_omnibox && resp.has_focus()) {
+        // Focus from a click: egui already placed the caret, but on the *displayed* text
+        // (scheme hidden), which has different char indices than the URL we edit from the next
+        // frame on. Map the caret to the URL and decide on release (plain click = select all,
+        // drag = keep the dragged range). Ctrl+L / Tab / new tab select everything right away.
+        let by_pointer = !w.chrome.select_all_omnibox
+            && !focused
+            && resp.hovered()
+            && ui.input(|i| i.pointer.any_pressed() || i.pointer.any_released());
         w.chrome.select_all_omnibox = false;
-        let len = buffer.chars().count();
-        output
-            .state
-            .cursor
-            .set_char_range(Some(egui::text::CCursorRange::two(
-                egui::text::CCursor::new(0),
-                egui::text::CCursor::new(len),
-            )));
-        output.state.store(ui.ctx(), field_id());
         if w.chrome.omnibox.editing.is_none() {
             w.chrome.omnibox.editing = Some(url_display.clone());
+        }
+        let edit_text = w
+            .chrome
+            .omnibox
+            .editing
+            .clone()
+            .unwrap_or_else(|| url_display.clone());
+        let range = if by_pointer {
+            let shown = output
+                .state
+                .cursor
+                .char_range()
+                .map_or(0, |r| r.primary.index.0);
+            let anchor = core_omnibox::display_to_edit_index(&text, shown);
+            w.chrome.omnibox.click_focus_pending = true;
+            egui::text::CCursorRange::one(egui::text::CCursor::new(anchor))
+        } else {
+            w.chrome.omnibox.click_focus_pending = false;
+            egui::text::CCursorRange::two(
+                egui::text::CCursor::new(0),
+                egui::text::CCursor::new(edit_text.chars().count()),
+            )
+        };
+        output.state.cursor.set_char_range(Some(range));
+        // `store` takes the state by value; the release check below still
+        // reads it this frame.
+        output.state.clone().store(ui.ctx(), field_id());
+    }
+    if w.chrome.omnibox.click_focus_pending
+        && (!resp.has_focus() || !ui.input(|i| i.pointer.any_down()))
+    {
+        w.chrome.omnibox.click_focus_pending = false;
+        if resp.has_focus() {
+            let edit_text = w
+                .chrome
+                .omnibox
+                .editing
+                .clone()
+                .unwrap_or_else(|| url_display.clone());
+            let current = output
+                .state
+                .cursor
+                .char_range()
+                .map_or((0, 0), |r| (r.secondary.index.0, r.primary.index.0));
+            let (anchor, caret) = core_omnibox::focus_click_selection(&edit_text, current);
+            output
+                .state
+                .cursor
+                .set_char_range(Some(egui::text::CCursorRange::two(
+                    egui::text::CCursor::new(anchor),
+                    egui::text::CCursor::new(caret),
+                )));
+            output.state.store(ui.ctx(), field_id());
         }
     }
     if focused {
@@ -304,18 +358,6 @@ pub fn omnibox(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &mut Vec
     });
 
     update_suggestions(w, env);
-}
-
-/// Hide the scheme and trailing slash when not editing.
-fn prettify_for_display(url: &str) -> String {
-    if let Some(s) = url.strip_prefix("https://") {
-        s.strip_suffix('/')
-            .filter(|r| !r.contains('/'))
-            .unwrap_or(s)
-            .to_string()
-    } else {
-        url.to_string()
-    }
 }
 
 fn run_command(cmd: &str, cmds: &mut Vec<Cmd>) {

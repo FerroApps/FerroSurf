@@ -218,6 +218,43 @@ pub fn inline_completion<'a>(
     None
 }
 
+/// How the address bar shows a URL while it is not being edited: the `https://` scheme and a
+/// bare trailing slash are hidden. The edited text is always the full URL.
+pub fn display_url(url: &str) -> String {
+    match url.strip_prefix("https://") {
+        Some(s) => s
+            .strip_suffix('/')
+            .filter(|r| !r.contains('/'))
+            .unwrap_or(s)
+            .to_string(),
+        None => url.to_string(),
+    }
+}
+
+/// Map a char index in [`display_url`]`(url)` to the same position in `url`.
+///
+/// The focusing click lands on the displayed (shorter) text, so its caret must be shifted
+/// before it is applied to the full URL, or selections end up offset by the hidden prefix.
+pub fn display_to_edit_index(url: &str, display_index: usize) -> usize {
+    let hidden_prefix = if display_url(url) != url && url.starts_with("https://") {
+        "https://".len()
+    } else {
+        0
+    };
+    (display_index + hidden_prefix).min(url.chars().count())
+}
+
+/// Selection (char range, `(anchor, caret)`) after the click that focused the address bar is
+/// released. A plain click selects the whole URL (like every desktop browser); a click that
+/// dragged keeps the dragged selection.
+pub fn focus_click_selection(edit_text: &str, current: (usize, usize)) -> (usize, usize) {
+    if current.0 == current.1 {
+        (0, edit_text.chars().count())
+    } else {
+        current
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -292,5 +329,37 @@ mod tests {
         );
         assert_eq!(r.len(), 2);
         assert_eq!(r[0].score, 5);
+    }
+
+    const DDG: &str = "https://duckduckgo.com/?q=kek&ia=web";
+
+    #[test]
+    fn display_url_hides_scheme_and_bare_slash() {
+        assert_eq!(display_url("https://example.com/"), "example.com");
+        assert_eq!(display_url(DDG), "duckduckgo.com/?q=kek&ia=web");
+        assert_eq!(display_url("http://example.com/"), "http://example.com/");
+        assert_eq!(display_url("ferro://settings/"), "ferro://settings/");
+    }
+
+    #[test]
+    fn display_index_maps_past_hidden_scheme() {
+        // Caret before "duckduckgo" in the shown text is after "https://" in the URL.
+        assert_eq!(display_to_edit_index(DDG, 0), 8);
+        assert_eq!(display_to_edit_index(DDG, 28), 36);
+        assert_eq!(display_to_edit_index("https://example.com/", 11), 19);
+        assert_eq!(display_to_edit_index("http://a.b/", 3), 3);
+        assert_eq!(display_to_edit_index(DDG, 999), 36);
+    }
+
+    #[test]
+    fn focusing_click_selects_the_whole_url() {
+        // v0.3.0 bug: the select-all length came from the 28-char displayed text and was
+        // applied to the 36-char URL, leaving "k&ia=web" unselected.
+        let len = DDG.chars().count();
+        assert_eq!(focus_click_selection(DDG, (17, 17)), (0, len));
+        assert_eq!(focus_click_selection("", (0, 0)), (0, 0));
+        let anchor = display_to_edit_index(DDG, 5);
+        assert_eq!(focus_click_selection(DDG, (anchor, 20)), (anchor, 20));
+        assert_eq!(focus_click_selection("ñandú.es", (2, 2)), (0, 8));
     }
 }
