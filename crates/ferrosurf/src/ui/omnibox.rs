@@ -216,7 +216,9 @@ pub fn omnibox(ui: &mut Ui, w: &mut BrowserWindow, env: &mut Env, cmds: &mut Vec
             )
         };
         output.state.cursor.set_char_range(Some(range));
-        output.state.store(ui.ctx(), field_id());
+        // `store` takes the state by value; the release check below still
+        // reads it this frame.
+        output.state.clone().store(ui.ctx(), field_id());
     }
     if w.chrome.omnibox.click_focus_pending
         && (!resp.has_focus() || !ui.input(|i| i.pointer.any_down()))
