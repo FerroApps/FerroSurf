@@ -52,3 +52,16 @@ builds on ubuntu-22.04 and windows-latest, and creates GitHub Release `v<version
 `ferrosurf-v<ver>-linux-x86_64.tar.gz` and `ferrosurf-v<ver>-windows-x86_64.zip` (+ `.sha256`).
 Linux users run `install.sh` (`curl ... | sh`; `-s -- --uninstall`); test it with
 `FERRO_RELEASE_API=file://...`.
+
+## Gotchas
+- Omnibox: while unfocused it shows `omnibox::display_url` (no `https://`), while focused the full
+  URL. The click that focuses it is laid out on the *displayed* text, so egui's caret/char indices
+  from that frame must go through `display_to_edit_index`; never compute a selection length from
+  the frame's buffer (v0.3.0 selected only 28 of 36 chars). A plain focusing click selects all on
+  release (`focus_click_selection`), a drag keeps its range, a click while focused places the caret.
+- Servo 0.8 ships several web APIs behind prefs that default OFF (`servo-config` `Preferences`:
+  IntersectionObserver, IndexedDB, Web Animations, container queries, …). Scripts that call a missing
+  constructor throw and leave blank pages (DuckDuckGo Images' grid). `settings.experimental_web_features`
+  (default on, applied in `app.rs` when Servo is built) turns on IntersectionObserver; check the
+  prefs before blaming the blocker. `blocker::tests::builtin_list_allows_duckduckgo_images` guards
+  the blocker side; never fake another browser's UA to work around engine gaps.
