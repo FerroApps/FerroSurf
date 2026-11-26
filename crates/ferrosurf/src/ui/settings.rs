@@ -2197,6 +2197,13 @@ fn advanced(ui: &mut Ui, env: &mut Env) -> bool {
         sep(ui);
         ch |= toggle(
             ui,
+            &mut s.experimental_web_features,
+            "Funciones web experimentales de Servo",
+            "IntersectionObserver (scroll infinito, rejillas como DuckDuckGo Imágenes). Requiere reiniciar FerroSurf",
+        );
+        sep(ui);
+        ch |= toggle(
+            ui,
             &mut s.enable_devtools,
             "Activar herramientas de desarrollo",
             "Requiere reiniciar FerroSurf",

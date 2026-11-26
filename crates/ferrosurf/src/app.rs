@@ -270,6 +270,12 @@ impl App {
         if !profile_data.settings.user_agent.trim().is_empty() {
             prefs.user_agent = profile_data.settings.user_agent.trim().to_string();
         }
+        if profile_data.settings.experimental_web_features {
+            // Off by default in Servo 0.8, but sites build on it: without it scripts that do
+            // `new IntersectionObserver(..)` throw and e.g. DuckDuckGo Images renders an
+            // empty results grid.
+            prefs.dom_intersection_observer_enabled = true;
+        }
         if profile_data.settings.enable_devtools {
             prefs.devtools_server_enabled = true;
             prefs.devtools_server_listen_address =
